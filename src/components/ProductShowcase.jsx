@@ -2,14 +2,16 @@ import { motion } from 'framer-motion';
 import { ShoppingCart } from 'lucide-react';
 import { CardContainer, CardBody, CardItem } from './ui/card-3d';
 import { useState } from 'react';
+import { useCart } from '../context/CartContext';
 
 function ProductShowcase({ product, reverse = false }) {
   const [isAdded, setIsAdded] = useState(false);
+  const { addToCart } = useCart();
 
   const handleAddToCart = () => {
+    addToCart(product);
     setIsAdded(true);
-    // Add to cart logic here
-    setTimeout(() => setIsAdded(false), 2000); // Reset after 2 seconds
+    setTimeout(() => setIsAdded(false), 2000);
   };
 
   return (

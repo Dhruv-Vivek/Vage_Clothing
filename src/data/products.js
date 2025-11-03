@@ -229,3 +229,75 @@ export const features = [
     icon: "design"
   }
 ];
+export const membershipPlans = [
+  {
+    id: 'basic',
+    name: 'Basic',
+    price: 599,
+    period: 'year',
+    discount: 10,
+    freeShipping: 2000,
+    features: [
+      '10% discount on all products',
+      'Free shipping on orders above ₹2000',
+      'Priority email support',
+      'Access to member-only sales'
+    ]
+  },
+  {
+    id: 'premium',
+    name: 'Premium',
+    price: 1299,
+    period: 'year',
+    discount: 20,
+    freeShipping: 0,
+    recommended: true,
+    features: [
+      '20% discount on all products',
+      'Free shipping on all orders',
+      'Early access to new collections',
+      '24/7 priority support',
+      'Birthday special offers'
+    ]
+  },
+  {
+    id: 'vip',
+    name: 'VIP',
+    price: 1599,
+    period: 'year',
+    discount: 30,
+    freeShipping: 0,
+    features: [
+      '30% discount on all products',
+      'Free express shipping worldwide',
+      'Exclusive limited edition access',
+      'Personal style consultant',
+      'VIP events and launches',
+      'Priority customer service'
+    ]
+  }
+];
+
+export const deliveryOptions = [
+  {
+    id: 'standard',
+    name: 'Standard Delivery',
+    days: '5-6 days',
+    price: 99,
+    memberPrice: 'FREE'
+  },
+  {
+    id: 'express',
+    name: 'Express Delivery',
+    days: '3-4 days',
+    price: 199,
+    memberPrice: 'FREE'
+  },
+  {
+    id: 'priority',
+    name: 'Priority Delivery',
+    days: '1-2 days',
+    price: 250,
+    memberPrice: 'FREE'
+  }
+];

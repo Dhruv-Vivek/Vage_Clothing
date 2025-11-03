@@ -1,14 +1,30 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { Search, Heart, ShoppingCart, Menu, X } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { 
+  Search, 
+  Heart, 
+  ShoppingCart, 
+  Menu, 
+  X, 
+  LogOut, 
+  User 
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
+import LoginModal from './LoginModal';
 
 function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const { cartCount, favorites } = useCart();
+  const { user, isLoggedIn, logout } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleScroll = () => {
+      // Set scrolled to true if the user scrolls down more than 50px
       setScrolled(window.scrollY > 50);
     };
     window.addEventListener('scroll', handleScroll);
@@ -69,24 +85,65 @@ function Navbar() {
             </div>
           </div>
 
-          {/* Right Icons */}
+          {/* Right Icons and Login/User Button Group */}
           <div className="flex items-center space-x-6">
-            {/* Login Button */}
-            <button className="hidden md:flex items-center space-x-2 bg-white text-black px-6 py-2 rounded-lg hover:bg-lighter-gray transition-all duration-300">
-              <span className="text-sm font-medium">Login</span>
-            </button>
+            
+            {/* Login/User Button - Corrected placement and logic */}
+            {isLoggedIn ? (
+              <div className="hidden md:flex items-center gap-4">
+                <div className="flex items-center gap-2 text-white">
+                  <User className="w-5 h-5" />
+                  <span className="text-sm font-medium">{user.name}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    logout();
+                    navigate('/');
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-dark-secondary border border-dark-border text-white rounded-lg hover:border-white transition-all"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="text-sm">Logout</span>
+                </button>
+              </div>
+            ) : (
+              // Login Button (Desktop)
+              <button
+                onClick={() => setLoginModalOpen(true)}
+                className="hidden md:flex items-center space-x-2 bg-white text-black px-6 py-2 rounded-lg hover:bg-lighter-gray transition-all duration-300"
+              >
+                <span className="text-sm font-medium">Login</span>
+              </button>
+            )}
 
             {/* Wishlist */}
-            <button className="relative group">
+            <button 
+              onClick={() => navigate('/favorites')}
+              className="relative group"
+            >
               <Heart className="w-6 h-6 text-white group-hover:text-lighter-gray transition-colors" />
+              {favorites.length > 0 && (
+                <span className="absolute -top-2 -right-2 bg-white text-black text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">
+                  {favorites.length}
+                </span>
+              )}
             </button>
 
             {/* Cart */}
-            <button className="relative group">
+            <button 
+              onClick={() => navigate('/cart')}
+              className="relative group"
+            >
               <ShoppingCart className="w-6 h-6 text-white group-hover:text-lighter-gray transition-colors" />
-              <span className="absolute -top-2 -right-2 bg-white text-black text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">
-                0
-              </span>
+              {cartCount > 0 && (
+                <motion.span
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="absolute -top-2 -right-2 bg-white text-black text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium"
+                >
+                  {cartCount}
+                </motion.span>
+              )}
             </button>
 
             {/* Mobile Menu Button */}
@@ -120,13 +177,39 @@ function Navbar() {
                   {link.name}
                 </Link>
               ))}
-              <button className="w-full bg-white text-black px-6 py-3 rounded-lg hover:bg-lighter-gray transition-all">
-                Login
-              </button>
+              {/* Mobile Login Button */}
+              {!isLoggedIn && (
+                <button 
+                  onClick={() => {
+                    setMobileMenuOpen(false); 
+                    setLoginModalOpen(true);
+                  }}
+                  className="w-full bg-white text-black px-6 py-3 rounded-lg hover:bg-lighter-gray transition-all"
+                >
+                  Login
+                </button>
+              )}
+              {/* Mobile Logout Button */}
+              {isLoggedIn && (
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    logout();
+                    navigate('/');
+                  }}
+                  className="flex items-center justify-center w-full gap-2 px-4 py-3 bg-dark-secondary border border-dark-border text-white rounded-lg hover:border-white transition-all"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="text-sm font-medium">Logout</span>
+                </button>
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Login Modal */}
+      <LoginModal isOpen={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
     </motion.nav>
   );
 }

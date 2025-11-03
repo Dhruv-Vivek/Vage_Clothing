@@ -1,11 +1,22 @@
 import { motion } from 'framer-motion';
-import { Heart } from 'lucide-react';
-import { useState } from 'react';
+import { Heart, ShoppingCart } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useCart } from '../context/CartContext';
 
 function ProductCard({ product, index }) {
-  const [isLiked, setIsLiked] = useState(false);
   const navigate = useNavigate();
+  const { addToCart, toggleFavorite, isFavorite } = useCart();
+  const isLiked = isFavorite(product.id);
+
+  const handleAddToCart = (e) => {
+    e.stopPropagation();
+    addToCart(product);
+  };
+
+  const handleToggleFavorite = (e) => {
+    e.stopPropagation();
+    toggleFavorite(product);
+  };
 
   return (
     <motion.div
@@ -31,18 +42,30 @@ function ProductCard({ product, index }) {
         {/* Overlay on hover */}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300"></div>
 
-        {/* Wishlist Button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsLiked(!isLiked);
-          }}
-          className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center hover:bg-white transition-all duration-300 z-10"
-        >
-          <Heart 
-            className={`w-5 h-5 transition-colors ${isLiked ? 'fill-red-500 text-red-500' : 'text-black'}`}
-          />
-        </button>
+        {/* Action Buttons */}
+        <div className="absolute top-4 right-4 flex flex-col gap-2">
+          {/* Wishlist Button */}
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={handleToggleFavorite}
+            className="w-10 h-10 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center hover:bg-white transition-all duration-300 z-10"
+          >
+            <Heart 
+              className={`w-5 h-5 transition-colors ${isLiked ? 'fill-red-500 text-red-500' : 'text-black'}`}
+            />
+          </motion.button>
+
+          {/* Add to Cart Button */}
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={handleAddToCart}
+            className="w-10 h-10 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center hover:bg-white transition-all duration-300 z-10"
+          >
+            <ShoppingCart className="w-5 h-5 text-black" />
+          </motion.button>
+        </div>
       </div>
 
       {/* Product Info */}
