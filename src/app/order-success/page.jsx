@@ -1,17 +1,17 @@
+'use client';
+
 import { motion } from 'framer-motion';
 import { CheckCircle, Package, Home } from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import Navbar from '../components/Navbar';
-import Footer from '../components/Footer';
+import { Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 function OrderSuccess() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const orderId = location.state?.orderId;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const orderId = searchParams.get('orderId');
 
   return (
-    <div className="min-h-screen bg-dark">
-      <Navbar />
+    <div className="bg-dark">
 
       <div className="pt-32 pb-20 px-4 flex items-center justify-center min-h-[70vh]">
         <motion.div
@@ -93,14 +93,14 @@ function OrderSuccess() {
             className="flex gap-4 justify-center"
           >
             <button
-              onClick={() => navigate('/')}
+              onClick={() => router.push('/')}
               className="px-8 py-3 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all flex items-center gap-2"
             >
               <Home className="w-5 h-5" />
               Back to Home
             </button>
             <button
-              onClick={() => navigate('/products')}
+              onClick={() => router.push('/products')}
               className="px-8 py-3 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all"
             >
               Continue Shopping
@@ -109,9 +109,15 @@ function OrderSuccess() {
         </motion.div>
       </div>
 
-      <Footer />
     </div>
   );
 }
 
-export default OrderSuccess;
+// useSearchParams() must sit inside a Suspense boundary for static builds
+export default function OrderSuccessPage() {
+  return (
+    <Suspense fallback={<div className="min-h-[70vh]" />}>
+      <OrderSuccess />
+    </Suspense>
+  );
+}

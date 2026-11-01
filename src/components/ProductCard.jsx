@@ -1,16 +1,19 @@
+'use client';
+
 import { motion } from 'framer-motion';
 import { Heart, ShoppingCart } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import { useCart } from '../context/CartContext';
 
 function ProductCard({ product, index }) {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { addToCart, toggleFavorite, isFavorite } = useCart();
   const isLiked = isFavorite(product.id);
+  const isOutOfStock = Number(product.availableStock ?? 0) <= 0;
 
   const handleAddToCart = (e) => {
     e.stopPropagation();
-    addToCart(product);
+    if (!isOutOfStock) addToCart(product);
   };
 
   const handleToggleFavorite = (e) => {
@@ -28,7 +31,7 @@ function ProductCard({ product, index }) {
       {/* Product Image Container */}
       <div 
         className="relative aspect-[3/4] rounded-2xl overflow-hidden bg-dark-secondary cursor-pointer"
-        onClick={() => navigate(`/products/${product.id}`)}
+        onClick={() => router.push(`/products/${product.id}`)}
       >
         <img
           src={product.image}
@@ -61,9 +64,11 @@ function ProductCard({ product, index }) {
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
             onClick={handleAddToCart}
+            disabled={isOutOfStock}
+            aria-label={isOutOfStock ? `${product.name} is out of stock` : `Add ${product.name} to cart`}
             className="w-10 h-10 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center hover:bg-white transition-all duration-300 z-10"
           >
-            <ShoppingCart className="w-5 h-5 text-black" />
+            <ShoppingCart className={`w-5 h-5 ${isOutOfStock ? 'text-gray-400' : 'text-black'}`} />
           </motion.button>
         </div>
       </div>
@@ -71,6 +76,7 @@ function ProductCard({ product, index }) {
       {/* Product Info */}
       <div className="mt-4 space-y-2">
         <p className="text-sm text-light-gray">{product.category}</p>
+        {isOutOfStock && <p className="text-xs text-red-300">Out of stock</p>}
         <h3 className="text-lg font-semibold text-white group-hover:text-lighter-gray transition-colors">
           {product.name}
         </h3>

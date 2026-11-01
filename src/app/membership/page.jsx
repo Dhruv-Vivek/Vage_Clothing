@@ -1,14 +1,14 @@
+'use client';
+
 import { motion } from 'framer-motion';
 import { Check, Crown, Star, Zap } from 'lucide-react';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import Navbar from '../components/Navbar';
-import Footer from '../components/Footer';
-import { membershipPlans } from '../data/products';
-import { useAuth } from '../context/AuthContext';
+import { useRouter } from 'next/navigation';
+import { membershipPlans } from '@/data/products';
+import { useAuth } from '@/context/AuthContext';
 
 function Membership() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { user, isLoggedIn, updateMembership } = useAuth();
   const [selectedPlan, setSelectedPlan] = useState(null);
 
@@ -22,7 +22,7 @@ function Membership() {
     // Mock subscription
     updateMembership(planId);
     alert(`Successfully subscribed to ${planId.toUpperCase()} plan!`);
-    navigate('/');
+    router.push('/');
   };
 
   const getPlanIcon = (planId) => {
@@ -39,8 +39,7 @@ function Membership() {
   };
 
   return (
-    <div className="min-h-screen bg-dark">
-      <Navbar />
+    <div className="bg-dark">
 
       <div className="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
@@ -258,7 +257,6 @@ function Membership() {
         </div>
       </div>
 
-      <Footer />
     </div>
   );
 }

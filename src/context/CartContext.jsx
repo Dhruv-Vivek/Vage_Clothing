@@ -1,3 +1,5 @@
+'use client';
+
 import { createContext, useContext, useState, useEffect } from 'react';
 
 const CartContext = createContext();
@@ -9,23 +11,33 @@ export function useCart() {
 export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
   const [favorites, setFavorites] = useState([]);
+  // true once localStorage has been read. Prevents the first render from overwriting the saved cart.
+  const [isCartLoaded, setIsCartLoaded] = useState(false);
 
   // Load from localStorage on mount
   useEffect(() => {
-    const savedCart = localStorage.getItem('cart');
-    const savedFavorites = localStorage.getItem('favorites');
-    if (savedCart) setCartItems(JSON.parse(savedCart));
-    if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+    try {
+      const savedCart = localStorage.getItem('cart');
+      const savedFavorites = localStorage.getItem('favorites');
+      if (savedCart) setCartItems(JSON.parse(savedCart));
+      if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+    } catch {
+      localStorage.removeItem('cart');
+      localStorage.removeItem('favorites');
+    }
+    setIsCartLoaded(true);
   }, []);
 
   // Save to localStorage whenever cart changes
   useEffect(() => {
+    if (!isCartLoaded) return;
     localStorage.setItem('cart', JSON.stringify(cartItems));
-  }, [cartItems]);
+  }, [cartItems, isCartLoaded]);
 
   useEffect(() => {
+    if (!isCartLoaded) return;
     localStorage.setItem('favorites', JSON.stringify(favorites));
-  }, [favorites]);
+  }, [favorites, isCartLoaded]);
 
   const addToCart = (product) => {
     setCartItems(prev => {
@@ -95,6 +107,7 @@ export function CartProvider({ children }) {
         clearCart,
         cartTotal,
         cartCount,
+        isCartLoaded,
       }}
     >
       {children}

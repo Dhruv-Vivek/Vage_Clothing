@@ -1,3 +1,5 @@
+'use client';
+
 // src/context/AuthContext.jsx
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
@@ -27,19 +29,27 @@ export const AuthProvider = ({ children }) => {
 
   // Load state from local storage on mount
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      const parsedUser = JSON.parse(storedUser);
-      setUser(parsedUser);
-      setIsLoggedIn(true);
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        setUser(JSON.parse(storedUser));
+        setIsLoggedIn(true);
+      }
+    } catch {
+      localStorage.removeItem('user');
     }
     setIsLoading(false);
   }, []);
 
   // Login function
-  const login = async (username, password) => {
-    // Simulate successful login after API call
-    const loggedInUser = fetchUser(username); 
+  // BATCH 1: still a mock. LoginModal passes a user object while the original
+  // signature expected a username string, so accept both (replaced by the real API in Batch 3).
+  const login = async (userOrName) => {
+    const base = typeof userOrName === 'string'
+      ? fetchUser(userOrName)
+      : { ...fetchUser(userOrName?.name || 'guest'), ...userOrName };
+    // LoginModal sent membership: null, which counted as "has membership"; normalise to 'none'
+    const loggedInUser = { ...base, membership: base.membership || 'none' };
     setUser(loggedInUser);
     setIsLoggedIn(true);
     localStorage.setItem('user', JSON.stringify(loggedInUser));
@@ -78,7 +88,8 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={contextValue}>
-      {!isLoading && children}
+      {/* Render children immediately so the server can pre-render pages; consumers use isLoading */}
+      {children}
     </AuthContext.Provider>
   );
 };
