@@ -1,0 +1,9 @@
+NEW src/lib/auth.js
+NEW src/app/api/auth/register/route.js
+NEW src/app/api/auth/login/route.js
+NEW src/app/api/auth/me/route.js
+NEW src/app/api/auth/logout/route.js
+UPDATED src/context/AuthContext.jsx
+UPDATED src/components/LoginModal.jsx
+UPDATED src/app/membership/page.jsx
+UPDATED .env.example

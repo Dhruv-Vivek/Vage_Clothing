@@ -1,104 +1,135 @@
 'use client';
 
-// src/context/AuthContext.jsx
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+const AuthContext = createContext(null);
 
-// 1. Create the Context
-const AuthContext = createContext();
+function normaliseUser(user) {
+  if (!user) return null;
+  return {
+    ...user,
+    id: Number(user.id),
+    membership: user.membership || 'none',
+  };
+}
 
-// Function to simulate fetching user details after login, now includes a membership field
-const fetchUser = (username) => ({
-  id: 1,
-  name: username,
-  email: `${username.toLowerCase()}@example.com`,
-  role: 'member',
-  // Default membership status
-  membership: 'none', // 'none', 'basic', 'premium', 'vip'
-});
+async function postAuthRequest(endpoint, body) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    cache: 'no-store',
+    body: JSON.stringify(body),
+  });
 
-// 2. Create the Provider Component
-export const AuthProvider = ({ children }) => {
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || 'Your request could not be completed.');
+  }
+  return normaliseUser(payload.user);
+}
+
+export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Derived State for easy access in components
-  const hasMembership = user && user.membership !== 'none';
-  const membershipType = user ? user.membership : 'none';
-
-  // Load state from local storage on mount
-  useEffect(() => {
+  const refresh = useCallback(async () => {
     try {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
-        setIsLoggedIn(true);
-      }
-    } catch {
-      localStorage.removeItem('user');
+      const response = await fetch('/api/auth/me', {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Unable to verify session.');
+      const nextUser = normaliseUser(payload.user);
+      setUser(nextUser);
+      return nextUser;
+    } catch (error) {
+      console.error('Unable to refresh authentication session:', error);
+      setUser(null);
+      return null;
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, []);
 
-  // Login function
-  // BATCH 1: still a mock. LoginModal passes a user object while the original
-  // signature expected a username string, so accept both (replaced by the real API in Batch 3).
-  const login = async (userOrName) => {
-    const base = typeof userOrName === 'string'
-      ? fetchUser(userOrName)
-      : { ...fetchUser(userOrName?.name || 'guest'), ...userOrName };
-    // LoginModal sent membership: null, which counted as "has membership"; normalise to 'none'
-    const loggedInUser = { ...base, membership: base.membership || 'none' };
-    setUser(loggedInUser);
-    setIsLoggedIn(true);
-    localStorage.setItem('user', JSON.stringify(loggedInUser));
-
-    return true; // Indicate success
-  };
-
-  // Logout function
-  const logout = () => {
-    setUser(null);
-    setIsLoggedIn(false);
-    localStorage.removeItem('user');
-  };
-
-  // NEW: Function to update membership status
-  const updateMembership = (planId) => {
-    if (user) {
-        // Create new user object with updated membership
-        const updatedUser = { ...user, membership: planId };
-        setUser(updatedUser);
-        // Persist the updated user data
-        localStorage.setItem('user', JSON.stringify(updatedUser));
+  useEffect(() => {
+    // Remove the legacy mock user. Authentication now comes only from the signed
+    // httpOnly cookie and the MySQL users table, never from localStorage.
+    try {
+      localStorage.removeItem('user');
+    } catch {
+      // localStorage may be unavailable in a restricted browser context.
     }
-  };
+    refresh();
+  }, [refresh]);
 
-  const contextValue = {
+  const login = useCallback(async (email, password) => {
+    const nextUser = await postAuthRequest('/api/auth/login', { email, password });
+    setUser(nextUser);
+    setIsLoading(false);
+    return nextUser;
+  }, []);
+
+  const register = useCallback(async ({ fullName, email, password, phone }) => {
+    const nextUser = await postAuthRequest('/api/auth/register', {
+      fullName,
+      email,
+      password,
+      phone: phone || '',
+    });
+    setUser(nextUser);
+    setIsLoading(false);
+    return nextUser;
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+    } catch (error) {
+      console.error('Logout request failed:', error);
+    } finally {
+      setUser(null);
+      setIsLoading(false);
+      try {
+        localStorage.removeItem('user');
+      } catch {
+        // Ignore unavailable localStorage.
+      }
+    }
+  }, []);
+
+  const membershipType = user?.membership || 'none';
+  const hasMembership = ['basic', 'premium', 'vip'].includes(membershipType);
+  const value = useMemo(() => ({
     user,
-    isLoggedIn,
+    isLoggedIn: Boolean(user),
     isLoading,
-    hasMembership,      // <- NOW EXPOSED for Checkout.jsx
-    membershipType,     // <- NOW EXPOSED for Checkout.jsx
+    hasMembership,
+    membershipType,
     login,
+    register,
     logout,
-    updateMembership,   // <- NOW EXPOSED for Membership.jsx
-  };
+    refresh,
+  }), [user, isLoading, hasMembership, membershipType, login, register, logout, refresh]);
 
-  return (
-    <AuthContext.Provider value={contextValue}>
-      {/* Render children immediately so the server can pre-render pages; consumers use isLoading */}
-      {children}
-    </AuthContext.Provider>
-  );
-};
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
 
-// 3. Create the Custom Hook
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
