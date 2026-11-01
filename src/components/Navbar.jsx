@@ -1,5 +1,8 @@
+'use client';
+
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { 
   Search, 
   Heart, 
@@ -18,9 +21,16 @@ function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   const { cartCount, favorites } = useCart();
-  const { user, isLoggedIn, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user, isLoggedIn, isLoading, logout } = useAuth();
+  const router = useRouter();
+
+  const handleSearch = (event) => {
+    event.preventDefault();
+    const query = searchTerm.trim();
+    router.push(query ? `/products?q=${encodeURIComponent(query)}` : '/products');
+  };
 
   useEffect(() => {
     const handleScroll = () => {
@@ -53,7 +63,7 @@ function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
-          <Link to="/" className="flex items-center">
+          <Link href="/" className="flex items-center">
             <span className="text-2xl font-bold tracking-wider text-white">
               VAGE
             </span>
@@ -64,7 +74,7 @@ function Navbar() {
             {navLinks.map((link) => (
               <Link
                 key={link.name}
-                to={link.path}
+                href={link.path}
                 className="text-light-gray hover:text-white transition-colors duration-300 relative group"
               >
                 {link.name}
@@ -74,22 +84,29 @@ function Navbar() {
           </div>
 
           {/* Search Bar */}
-          <div className="hidden lg:flex items-center">
+          <form onSubmit={handleSearch} className="hidden lg:flex items-center">
             <div className="relative">
               <input
-                type="text"
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="what are you looking for"
-                className="bg-dark-secondary border border-dark-border rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-lighter-gray transition-colors w-64"
+                aria-label="Search Vage products"
+                className="bg-dark-secondary border border-dark-border rounded-lg pl-10 pr-12 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-lighter-gray transition-colors w-64"
               />
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 w-4 h-4" />
+              <button type="submit" aria-label="Submit product search" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1">
+                <span className="sr-only">Search</span>
+                ↵
+              </button>
             </div>
-          </div>
+          </form>
 
           {/* Right Icons and Login/User Button Group */}
           <div className="flex items-center space-x-6">
             
             {/* Login/User Button - Corrected placement and logic */}
-            {isLoggedIn ? (
+            {isLoading ? null : isLoggedIn ? (
               <div className="hidden md:flex items-center gap-4">
                 <div className="flex items-center gap-2 text-white">
                   <User className="w-5 h-5" />
@@ -98,7 +115,7 @@ function Navbar() {
                 <button
                   onClick={() => {
                     logout();
-                    navigate('/');
+                    router.push('/');
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-dark-secondary border border-dark-border text-white rounded-lg hover:border-white transition-all"
                 >
@@ -118,7 +135,7 @@ function Navbar() {
 
             {/* Wishlist */}
             <button 
-              onClick={() => navigate('/favorites')}
+              onClick={() => router.push('/favorites')}
               className="relative group"
             >
               <Heart className="w-6 h-6 text-white group-hover:text-lighter-gray transition-colors" />
@@ -131,7 +148,7 @@ function Navbar() {
 
             {/* Cart */}
             <button 
-              onClick={() => navigate('/cart')}
+              onClick={() => router.push('/cart')}
               className="relative group"
             >
               <ShoppingCart className="w-6 h-6 text-white group-hover:text-lighter-gray transition-colors" />
@@ -170,7 +187,7 @@ function Navbar() {
               {navLinks.map((link) => (
                 <Link
                   key={link.name}
-                  to={link.path}
+                  href={link.path}
                   className="block text-light-gray hover:text-white transition-colors py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >
@@ -195,7 +212,7 @@ function Navbar() {
                   onClick={() => {
                     setMobileMenuOpen(false);
                     logout();
-                    navigate('/');
+                    router.push('/');
                   }}
                   className="flex items-center justify-center w-full gap-2 px-4 py-3 bg-dark-secondary border border-dark-border text-white rounded-lg hover:border-white transition-all"
                 >

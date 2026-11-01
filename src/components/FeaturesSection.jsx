@@ -1,4 +1,7 @@
+'use client';
+
 import { motion } from 'framer-motion';
+import { useRouter } from 'next/navigation';
 import { Sparkles, Leaf, Clock } from 'lucide-react';
 import { BackgroundBeams } from './ui/background-beams';
 
@@ -47,6 +50,7 @@ function FeatureCard({ feature, index }) {
 }
 
 function FeaturesSection() {
+  const router = useRouter();
   const features = [
     {
       title: "Premium Quality",
@@ -103,7 +107,7 @@ function FeaturesSection() {
           className="text-center mt-16"
         >
           <button 
-            onClick={() => window.location.href = '/products'}
+            onClick={() => router.push('/products')}
             className="group px-8 py-4 bg-white text-black rounded-lg hover:bg-lighter-gray transition-all duration-300 inline-flex items-center gap-2"
           >
             <span className="font-medium">Explore All Products</span>

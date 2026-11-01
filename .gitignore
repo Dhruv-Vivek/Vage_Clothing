@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Next.js
+.next
+out
+next-env.d.ts
+*.tsbuildinfo
+
+# Environment files (secrets). Commit only .env.example
+.env
+.env.*
+!.env.example

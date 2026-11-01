@@ -1,3 +1,5 @@
+'use client';
+
 import { motion } from 'framer-motion';
 import { ShoppingCart } from 'lucide-react';
 import { CardContainer, CardBody, CardItem } from './ui/card-3d';

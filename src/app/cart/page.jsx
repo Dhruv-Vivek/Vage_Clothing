@@ -1,37 +1,37 @@
+'use client';
+
 import { motion } from 'framer-motion';
 import { Trash2, Plus, Minus, ShoppingBag } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import Navbar from '../components/Navbar';
-import Footer from '../components/Footer';
-import { useCart } from '../context/CartContext';
+import { useRouter } from 'next/navigation';
+import { useCart } from '@/context/CartContext';
 
 function Cart() {
-  const navigate = useNavigate();
-  const { cartItems, removeFromCart, updateQuantity, cartTotal } = useCart();
+  const router = useRouter();
+  const { cartItems, removeFromCart, updateQuantity, cartTotal, isCartLoaded } = useCart();
+
+  // wait for localStorage so the server-rendered page never flashes "cart is empty"
+  if (!isCartLoaded) return <div className="min-h-[60vh]" />;
 
   if (cartItems.length === 0) {
     return (
-      <div className="min-h-screen bg-dark">
-        <Navbar />
+      <div className="bg-dark">
         <div className="pt-32 pb-20 px-4 flex flex-col items-center justify-center min-h-[60vh]">
           <ShoppingBag className="w-24 h-24 text-light-gray mb-6" />
           <h2 className="text-3xl font-bold text-white mb-4">Your cart is empty</h2>
           <p className="text-light-gray mb-8">Add some products to get started!</p>
           <button
-            onClick={() => navigate('/products')}
+            onClick={() => router.push('/products')}
             className="px-8 py-3 bg-white text-black rounded-lg hover:bg-lighter-gray transition-all"
           >
             Shop Now
           </button>
         </div>
-        <Footer />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-dark">
-      <Navbar />
+    <div className="bg-dark">
 
       <div className="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
@@ -142,14 +142,14 @@ function Cart() {
                 </div>
 
                 <button
-                  onClick={() => navigate('/checkout')}
+                  onClick={() => router.push('/checkout')}
                   className="w-full py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all"
                 >
                   Proceed to Checkout
                 </button>
 
                 <button
-                  onClick={() => navigate('/products')}
+                  onClick={() => router.push('/products')}
                   className="w-full mt-3 py-4 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all"
                 >
                   Continue Shopping
@@ -160,7 +160,6 @@ function Cart() {
         </div>
       </div>
 
-      <Footer />
     </div>
   );
 }

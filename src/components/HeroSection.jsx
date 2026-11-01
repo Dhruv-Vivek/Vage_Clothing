@@ -1,12 +1,14 @@
+'use client';
+
 import { motion } from 'framer-motion';
 import { ChevronDown, ArrowRight } from 'lucide-react';
 import { TextGenerateEffect } from './ui/text-generate-effect';
 import { MovingBorderButton } from './ui/moving-border';
 import { Spotlight } from './ui/spotlight';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 
 function HeroSection() {
-  const navigate = useNavigate();
+  const router = useRouter();
 
   return (
     <div className="relative h-screen w-full overflow-hidden">
@@ -70,7 +72,7 @@ function HeroSection() {
           >
             {/* Shop Collection Button */}
             <MovingBorderButton
-              onClick={() => navigate('/products')}
+              onClick={() => router.push('/products')}
               className="group"
             >
               <span className="flex items-center gap-2">
@@ -81,7 +83,7 @@ function HeroSection() {
 
             {/* New Arrivals Button */}
             <button
-              onClick={() => navigate('/products?filter=new')}
+              onClick={() => router.push('/products?filter=new')}
               className="px-8 py-3 rounded-lg border-2 border-white text-white hover:bg-white hover:text-black transition-all duration-300 font-medium"
             >
               New Arrivals

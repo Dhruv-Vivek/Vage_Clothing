@@ -1,16 +1,16 @@
-import { useState } from 'react';
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import { MapPin, Truck, CreditCard, Check } from 'lucide-react';
-import Navbar from '../components/Navbar';
-import Footer from '../components/Footer';
-import { useCart } from '../context/CartContext';
-import { useAuth } from '../context/AuthContext';
-import { deliveryOptions } from '../data/products';
+import { useCart } from '@/context/CartContext';
+import { useAuth } from '@/context/AuthContext';
+import { deliveryOptions } from '@/data/products';
 
 function Checkout() {
-  const navigate = useNavigate();
-  const { cartItems, cartTotal, clearCart } = useCart();
+  const router = useRouter();
+  const { cartItems, cartTotal, clearCart, isCartLoaded } = useCart();
   const { user, isLoggedIn, hasMembership, membershipType } = useAuth();
   
   const [currentStep, setCurrentStep] = useState(1);
@@ -25,11 +25,17 @@ function Checkout() {
   });
   const [selectedDelivery, setSelectedDelivery] = useState('standard');
 
-  // Redirect if cart is empty
-  if (cartItems.length === 0) {
-    navigate('/cart');
-    return null;
-  }
+  const orderPlaced = useRef(false);
+
+  // Redirect if the cart is empty. Done in an effect because navigation must not happen
+  // during render; skipped right after placing an order (the cart is cleared on purpose).
+  useEffect(() => {
+    if (isCartLoaded && cartItems.length === 0 && !orderPlaced.current) {
+      router.replace('/cart');
+    }
+  }, [isCartLoaded, cartItems.length, router]);
+
+  if (!isCartLoaded || cartItems.length === 0) return null;
 
   // Calculate delivery price based on membership
   const getDeliveryPrice = (option) => {
@@ -71,8 +77,9 @@ function Checkout() {
     orders.push(order);
     localStorage.setItem('orders', JSON.stringify(orders));
 
+    orderPlaced.current = true;
     clearCart();
-    navigate('/order-success', { state: { orderId: order.id } });
+    router.push(`/order-success?orderId=${order.id}`);
   };
 
   const steps = [
@@ -82,8 +89,7 @@ function Checkout() {
   ];
 
   return (
-    <div className="min-h-screen bg-dark">
-      <Navbar />
+    <div className="bg-dark">
 
       <div className="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
@@ -334,7 +340,7 @@ function Checkout() {
                         💡 Want free delivery on all orders?
                       </p>
                       <button
-                        onClick={() => navigate('/membership')}
+                        onClick={() => router.push('/membership')}
                         className="text-white font-medium underline hover:text-lighter-gray"
                       >
                         Check out our membership plans →
@@ -451,7 +457,6 @@ function Checkout() {
         </div>
       </div>
 
-      <Footer />
     </div>
   );
 }
