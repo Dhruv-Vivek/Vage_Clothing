@@ -138,7 +138,11 @@ async function dispatchOne(outboxRow) {
   const [claim] = await pool.execute(
     `UPDATE email_outbox
      SET status = 'PROCESSING', attempts = attempts + 1, last_error = NULL
-     WHERE email_outbox_id = ? AND status IN ('PENDING','FAILED')`,
+     WHERE email_outbox_id = ?
+       AND (
+         status IN ('PENDING','FAILED')
+         OR (status = 'PROCESSING' AND updated_at < DATE_SUB(NOW(), INTERVAL 10 MINUTE))
+       )`,
     [outboxRow.email_outbox_id]
   );
 
@@ -198,7 +202,10 @@ export async function dispatchPaidOrderEmails(orderId) {
             subject, payload, status
      FROM email_outbox
      WHERE dedupe_key IN (?, ?)
-       AND status IN ('PENDING','FAILED')
+       AND (
+         status IN ('PENDING','FAILED')
+         OR (status = 'PROCESSING' AND updated_at < DATE_SUB(NOW(), INTERVAL 10 MINUTE))
+       )
      ORDER BY email_outbox_id`,
     [`order-confirmation/${numericId}`, `payment-receipt/${numericId}`]
   );
@@ -206,4 +213,24 @@ export async function dispatchPaidOrderEmails(orderId) {
   const results = [];
   for (const row of rows) results.push(await dispatchOne(row));
   return results;
+}
+
+/** Worker entry point for a scheduled job; processes a small bounded outbox batch. */
+export async function dispatchPendingEmails(limit = 20) {
+  const pool = getPool();
+  const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
+  const [rows] = await pool.execute(
+    `SELECT email_outbox_id, dedupe_key, event_type, recipient_email,
+            subject, payload, status
+     FROM email_outbox
+     WHERE status IN ('PENDING','FAILED')
+        OR (status = 'PROCESSING' AND updated_at < DATE_SUB(NOW(), INTERVAL 10 MINUTE))
+     ORDER BY email_outbox_id
+     LIMIT ?`,
+    [safeLimit]
+  );
+
+  const results = [];
+  for (const row of rows) results.push(await dispatchOne(row));
+  return { checked: rows.length, results };
 }
