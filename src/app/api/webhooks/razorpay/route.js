@@ -4,7 +4,6 @@ import { getPool } from '@/lib/db';
 import { getRazorpay, verifyWebhookSignature } from '@/lib/razorpay';
 import {
   markRazorpayPaymentCaptured,
-  markRazorpayPaymentFailed,
 } from '@/lib/order-payments';
 
 export const runtime = 'nodejs';
@@ -93,12 +92,16 @@ export async function POST(request) {
           currency: livePayment.currency,
           signatureVerified: true,
         });
-      } else if (livePayment.status === 'failed' && event.event === 'payment.failed') {
-        await markRazorpayPaymentFailed({
+      } else if (livePayment.status === 'authorized') {
+        const { markRazorpayPaymentAuthorized } = await import('@/lib/order-payments');
+        await markRazorpayPaymentAuthorized({
           gatewayOrderId: livePayment.order_id,
           gatewayPaymentId: livePayment.id,
         });
       }
+      // A failed attempt does not cancel the order here: Razorpay may still
+      // accept another attempt in the same Checkout session. Reconcile only
+      // after the customer dismisses Checkout or through the stale-order job.
     }
 
     await pool.execute(
