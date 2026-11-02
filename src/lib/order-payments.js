@@ -160,7 +160,7 @@ export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPayment
 
     const [rows] = await connection.execute(
       `SELECT o.order_id, o.status AS order_status, o.payment_status,
-              p.payment_id, g.gateway_order_id
+              o.coupon_id, p.payment_id, g.gateway_order_id
        FROM order_payment_gateways g
        INNER JOIN payments p ON p.payment_id = g.payment_id
        INNER JOIN orders o ON o.order_id = p.order_id
@@ -208,6 +208,15 @@ export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPayment
        WHERE order_id = ? AND payment_status <> 'PAID'`,
       [orderId]
     );
+
+    // Coupon usage was counted at order creation; release the reservation
+    // when the unpaid order is finally cancelled.
+    if (row.coupon_id) {
+      await connection.execute(
+        'UPDATE coupons SET usage_count = GREATEST(usage_count - 1, 0) WHERE coupon_id = ?',
+        [row.coupon_id]
+      );
+    }
 
     await connection.commit();
     return { orderId, paymentStatus: 'FAILED', stockReleased: true };
