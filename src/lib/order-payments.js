@@ -13,6 +13,7 @@ export async function markRazorpayPaymentCaptured({
   amount,
   currency,
   signatureVerified,
+  dispatchEmails = true,
 }) {
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -87,11 +88,14 @@ export async function markRazorpayPaymentCaptured({
     connection.release();
   }
 
-  // Email failure must never undo a captured payment or fail the checkout.
-  const emailResults = await dispatchPaidOrderEmails(orderId).catch((error) => [{
-    status: 'FAILED',
-    error: String(error?.message || 'Unable to dispatch order emails.'),
-  }]);
+  // Webhooks can acknowledge after durable outbox insertion; a scheduled worker
+  // sends email separately so a slow email provider cannot delay Razorpay ACKs.
+  const emailResults = dispatchEmails
+    ? await dispatchPaidOrderEmails(orderId).catch((error) => [{
+        status: 'FAILED',
+        error: String(error?.message || 'Unable to dispatch order emails.'),
+      }])
+    : [{ status: 'QUEUED' }];
 
   return { orderId, paymentStatus: 'PAID', emailResults };
 }
