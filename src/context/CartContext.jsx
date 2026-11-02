@@ -1,26 +1,45 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 
-const CartContext = createContext();
+const CartContext = createContext(null);
+
+function formatPrice(value) {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function legacyPrice(value) {
+  if (typeof value === 'number') return value;
+  return Number(String(value || '0').replace(/[^0-9.]/g, '')) || 0;
+}
 
 export function useCart() {
-  return useContext(CartContext);
+  const context = useContext(CartContext);
+  if (!context) throw new Error('useCart must be used within a CartProvider');
+  return context;
 }
 
 export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
   const [favorites, setFavorites] = useState([]);
-  // true once localStorage has been read. Prevents the first render from overwriting the saved cart.
   const [isCartLoaded, setIsCartLoaded] = useState(false);
 
-  // Load from localStorage on mount
   useEffect(() => {
     try {
       const savedCart = localStorage.getItem('cart');
       const savedFavorites = localStorage.getItem('favorites');
-      if (savedCart) setCartItems(JSON.parse(savedCart));
-      if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+      if (savedCart) {
+        const parsed = JSON.parse(savedCart);
+        if (Array.isArray(parsed)) setCartItems(parsed);
+      }
+      if (savedFavorites) {
+        const parsed = JSON.parse(savedFavorites);
+        if (Array.isArray(parsed)) setFavorites(parsed);
+      }
     } catch {
       localStorage.removeItem('cart');
       localStorage.removeItem('favorites');
@@ -28,7 +47,6 @@ export function CartProvider({ children }) {
     setIsCartLoaded(true);
   }, []);
 
-  // Save to localStorage whenever cart changes
   useEffect(() => {
     if (!isCartLoaded) return;
     localStorage.setItem('cart', JSON.stringify(cartItems));
@@ -39,60 +57,92 @@ export function CartProvider({ children }) {
     localStorage.setItem('favorites', JSON.stringify(favorites));
   }, [favorites, isCartLoaded]);
 
-  const addToCart = (product) => {
-    setCartItems(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.map(item =>
-          item.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        );
-      }
-      return [...prev, { ...product, quantity: 1 }];
+  // A cart line is one exact product variant (product + size + colour).
+  const addToCart = (product, variant, quantity = 1) => {
+    const variantId = Number(variant?.variantId);
+    const requestedQuantity = Number(quantity);
+    if (
+      !Number.isSafeInteger(variantId) ||
+      variantId <= 0 ||
+      !Number.isSafeInteger(requestedQuantity) ||
+      requestedQuantity < 1
+    ) {
+      return false;
+    }
+
+    const id = `variant-${variantId}`;
+    const unitPrice = Number(variant.unitPrice);
+    const stockQuantity = Number(variant.stockQuantity || 0);
+    const line = {
+      ...product,
+      id,
+      productId: Number(product.productId || product.id),
+      variantId,
+      sku: variant.sku,
+      size: variant.size,
+      color: variant.color,
+      unitPrice,
+      price: formatPrice(unitPrice),
+      stockQuantity,
+      quantity: requestedQuantity,
+    };
+
+    setCartItems((previous) => {
+      const existing = previous.find((item) => item.id === id);
+      if (!existing) return [...previous, line];
+      const nextQuantity = Math.min(
+        stockQuantity,
+        Number(existing.quantity || 0) + requestedQuantity
+      );
+      return previous.map((item) => item.id === id
+        ? { ...item, quantity: nextQuantity, stockQuantity, unitPrice, price: formatPrice(unitPrice) }
+        : item);
     });
+
+    return true;
   };
 
-  const removeFromCart = (productId) => {
-    setCartItems(prev => prev.filter(item => item.id !== productId));
+  const removeFromCart = (lineId) => {
+    setCartItems((previous) => previous.filter((item) => item.id !== lineId));
   };
 
-  const updateQuantity = (productId, quantity) => {
-    if (quantity <= 0) {
-      removeFromCart(productId);
+  const updateQuantity = (lineId, quantity) => {
+    const nextQuantity = Number(quantity);
+    if (!Number.isSafeInteger(nextQuantity) || nextQuantity <= 0) {
+      removeFromCart(lineId);
       return;
     }
-    setCartItems(prev =>
-      prev.map(item =>
-        item.id === productId ? { ...item, quantity } : item
-      )
-    );
+    setCartItems((previous) => previous.map((item) => {
+      if (item.id !== lineId) return item;
+      const max = Number(item.stockQuantity || nextQuantity);
+      return { ...item, quantity: Math.min(nextQuantity, Math.max(1, max)) };
+    }));
   };
 
   const toggleFavorite = (product) => {
-    setFavorites(prev => {
-      const exists = prev.find(item => item.id === product.id);
-      if (exists) {
-        return prev.filter(item => item.id !== product.id);
-      }
-      return [...prev, product];
+    setFavorites((previous) => {
+      const exists = previous.some((item) => Number(item.id) === Number(product.id));
+      return exists
+        ? previous.filter((item) => Number(item.id) !== Number(product.id))
+        : [...previous, product];
     });
   };
 
-  const isFavorite = (productId) => {
-    return favorites.some(item => item.id === productId);
-  };
+  const isFavorite = (productId) => favorites.some(
+    (item) => Number(item.id) === Number(productId)
+  );
 
-  const clearCart = () => {
-    setCartItems([]);
-  };
+  const clearCart = () => setCartItems([]);
 
   const cartTotal = cartItems.reduce((total, item) => {
-    const price = parseFloat(item.price.replace('₹', '').replace(',', ''));
-    return total + (price * item.quantity);
+    const unitPrice = Number.isFinite(Number(item.unitPrice))
+      ? Number(item.unitPrice)
+      : legacyPrice(item.price);
+    return total + unitPrice * Number(item.quantity || 0);
   }, 0);
 
-  const cartCount = cartItems.reduce((count, item) => count + item.quantity, 0);
+  const cartCount = cartItems.reduce((count, item) => count + Number(item.quantity || 0), 0);
+  const hasUnselectedVariants = cartItems.some((item) => !Number.isSafeInteger(Number(item.variantId)));
 
   return (
     <CartContext.Provider
@@ -108,6 +158,7 @@ export function CartProvider({ children }) {
         cartTotal,
         cartCount,
         isCartLoaded,
+        hasUnselectedVariants,
       }}
     >
       {children}
