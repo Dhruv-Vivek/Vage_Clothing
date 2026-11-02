@@ -264,7 +264,12 @@ function Checkout() {
               return;
             }
 
-            setErrorMessage(verification.error || 'Payment verification failed. Contact support before attempting another payment.');
+            // Reconcile against Razorpay's live payment list before allowing
+            // another checkout attempt. A browser callback alone is not proof
+            // that this order failed or succeeded.
+            dismissHandled.current = false;
+            await reconcileAbandonedCheckout(checkout.orderId, checkout.razorpayOrderId);
+            if (verification.error) setErrorMessage(verification.error);
           } catch {
             // Razorpay has returned a signed success callback. Avoid asking the
             // customer to pay twice; the webhook and order page can reconcile it.
