@@ -166,7 +166,7 @@ async function compensateFailedGatewayCreate(orderId) {
   try {
     await connection.beginTransaction();
     const [orders] = await connection.execute(
-      `SELECT status, payment_status FROM orders WHERE order_id = ? FOR UPDATE`,
+      `SELECT status, payment_status, coupon_id FROM orders WHERE order_id = ? FOR UPDATE`,
       [orderId]
     );
 
@@ -192,6 +192,12 @@ async function compensateFailedGatewayCreate(orderId) {
          WHERE order_id = ? AND payment_status <> 'PAID'`,
         [orderId]
       );
+      if (orders[0].coupon_id) {
+        await connection.execute(
+          'UPDATE coupons SET usage_count = GREATEST(usage_count - 1, 0) WHERE coupon_id = ?',
+          [orders[0].coupon_id]
+        );
+      }
     }
 
     await connection.execute(
