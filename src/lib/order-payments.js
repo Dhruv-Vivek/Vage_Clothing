@@ -68,7 +68,7 @@ export async function markRazorpayPaymentCaptured({
         [gatewayPaymentId, signatureVerified ? 1 : 0, gatewayOrderId]
       );
       await connection.execute(
-        `UPDATE orders SET payment_status = 'PAID' WHERE order_id = ?`,
+        `UPDATE orders SET status = 'CONFIRMED', payment_status = 'PAID' WHERE order_id = ?`,
         [orderId]
       );
 
@@ -94,6 +94,56 @@ export async function markRazorpayPaymentCaptured({
   }]);
 
   return { orderId, paymentStatus: 'PAID', emailResults };
+}
+
+
+export async function markRazorpayPaymentAuthorized({ gatewayOrderId, gatewayPaymentId }) {
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      `SELECT o.order_id, o.status AS order_status, o.payment_status,
+              g.gateway_payment_id
+       FROM order_payment_gateways g
+       INNER JOIN payments p ON p.payment_id = g.payment_id
+       INNER JOIN orders o ON o.order_id = p.order_id
+       WHERE g.gateway_order_id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [gatewayOrderId]
+    );
+
+    if (!rows.length) throw new Error('Razorpay order is not linked to a VAGE order.');
+    const row = rows[0];
+
+    if (row.payment_status === 'PAID') {
+      await connection.commit();
+      return { paymentStatus: 'PAID', alreadyFinal: true };
+    }
+    if (row.order_status === 'CANCELLED' || row.order_status === 'RETURNED') {
+      throw new Error('This order is no longer active.');
+    }
+    if (row.gateway_payment_id && row.gateway_payment_id !== gatewayPaymentId) {
+      throw new Error('A different Razorpay payment is already associated with this order.');
+    }
+
+    await connection.execute(
+      `UPDATE order_payment_gateways
+       SET gateway_payment_id = ?, status = 'AUTHORIZED'
+       WHERE gateway_order_id = ? AND status <> 'CAPTURED'`,
+      [gatewayPaymentId, gatewayOrderId]
+    );
+
+    await connection.commit();
+    return { paymentStatus: 'PENDING', gatewayStatus: 'AUTHORIZED' };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPaymentId }) {
