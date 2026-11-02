@@ -48,8 +48,16 @@ export async function GET(_request, context) {
       [orderId]
     );
 
+    const emailDelivery = await query(
+      `SELECT event_type, status, provider_message_id, last_error, sent_at
+       FROM email_outbox
+       WHERE dedupe_key IN (?, ?)
+       ORDER BY email_outbox_id`,
+      [`order-confirmation/${orderId}`, `payment-receipt/${orderId}`]
+    );
+
     return NextResponse.json(
-      { order: orders[0], items },
+      { order: orders[0], items, emailDelivery },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } }
     );
   } catch (error) {
