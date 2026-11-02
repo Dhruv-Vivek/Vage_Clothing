@@ -320,7 +320,10 @@ export async function POST(request) {
       if (input.couponCode) {
         const [coupons] = await connection.execute(
           `SELECT coupon_id, discount_type, discount_value, min_order_amount,
-                  max_discount, usage_limit, usage_count, starts_at, expires_at, is_active
+                  max_discount, usage_limit, usage_count,
+                  (starts_at <= NOW()) AS is_started,
+                  (expires_at > NOW()) AS is_unexpired,
+                  is_active
            FROM coupons
            WHERE coupon_code = ?
            LIMIT 1
@@ -329,7 +332,7 @@ export async function POST(request) {
         );
         const coupon = coupons[0];
         if (!coupon || !coupon.is_active) throw new Error('Coupon is invalid or inactive.');
-        if (new Date(coupon.starts_at).getTime() > Date.now() || new Date(coupon.expires_at).getTime() <= Date.now()) {
+        if (!coupon.is_started || !coupon.is_unexpired) {
           throw new Error('Coupon is outside its valid date range.');
         }
         if (coupon.usage_limit !== null && Number(coupon.usage_count) >= Number(coupon.usage_limit)) {
