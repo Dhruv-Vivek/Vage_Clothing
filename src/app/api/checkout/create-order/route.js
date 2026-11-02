@@ -207,55 +207,6 @@ async function compensateFailedGatewayCreate(orderId) {
   }
 }
 
-async function expireStaleUnpaidOrders(connection) {
-  // Checkout stock reservations older than 2 hours are released on the next
-  // checkout attempt. Captured payments are never expired by this cleanup.
-  const [expired] = await connection.execute(
-    `SELECT o.order_id
-     FROM orders o
-     WHERE o.status = 'PENDING'
-       AND o.payment_status = 'PENDING'
-       AND o.created_at < DATE_SUB(NOW(), INTERVAL 2 HOUR)
-     ORDER BY o.created_at
-     LIMIT 25
-     FOR UPDATE`
-  );
-
-  for (const row of expired) {
-    const orderId = Number(row.order_id);
-    const [items] = await connection.execute(
-      'SELECT variant_id, quantity FROM order_items WHERE order_id = ?',
-      [orderId]
-    );
-    for (const item of items) {
-      await connection.execute(
-        'UPDATE inventory SET stock_quantity = stock_quantity + ? WHERE variant_id = ?',
-        [Number(item.quantity), Number(item.variant_id)]
-      );
-    }
-    await connection.execute(
-      `UPDATE payments SET status = 'FAILED'
-       WHERE order_id = ? AND status = 'PENDING'`,
-      [orderId]
-    );
-    await connection.execute(
-      `UPDATE order_payment_gateways SET status = 'FAILED'
-       WHERE payment_id IN (SELECT payment_id FROM payments WHERE order_id = ?)
-         AND status <> 'CAPTURED'`,
-      [orderId]
-    );
-    await connection.execute(
-      `UPDATE orders SET status = 'CANCELLED', payment_status = 'FAILED'
-       WHERE order_id = ? AND payment_status = 'PENDING'`,
-      [orderId]
-    );
-    await connection.execute(
-      'DELETE FROM checkout_idempotency_keys WHERE order_id = ?',
-      [orderId]
-    );
-  }
-}
-
 export async function POST(request) {
   const user = await getCurrentUser();
   if (!user) return jsonError('Please sign in before checkout.', 401);
@@ -287,7 +238,6 @@ export async function POST(request) {
 
     try {
       await connection.beginTransaction();
-      await expireStaleUnpaidOrders(connection);
 
       await connection.execute(
         `INSERT INTO checkout_idempotency_keys
