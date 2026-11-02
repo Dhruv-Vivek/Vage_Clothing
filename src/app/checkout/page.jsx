@@ -284,7 +284,7 @@ function Checkout() {
 
       const razorpay = new window.Razorpay(options);
       razorpay.on('payment.failed', () => {
-        reconcileAbandonedCheckout(checkout.orderId, checkout.razorpayOrderId);
+        setPaymentMessage('This payment attempt did not complete. You can retry from the Razorpay window; your order will remain pending until the checkout window is closed.');
       });
       razorpay.open();
     } catch (error) {
