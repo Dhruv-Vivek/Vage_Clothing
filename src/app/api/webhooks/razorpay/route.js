@@ -73,7 +73,7 @@ export async function POST(request) {
       event.payload?.order?.entity?.payments?.items?.[0] ||
       null;
 
-    if (['payment.captured', 'order.paid', 'payment.failed', 'payment.authorized'].includes(event.event)) {
+    if (['payment.captured', 'payment.failed', 'payment.authorized'].includes(event.event)) {
       if (!paymentEntity?.id || !paymentEntity?.order_id) {
         throw new Error('Payment webhook is missing payment or Razorpay order identifiers.');
       }
