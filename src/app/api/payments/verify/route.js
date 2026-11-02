@@ -4,7 +4,6 @@ import { getPool } from '@/lib/db';
 import { getRazorpay, verifyCheckoutSignature } from '@/lib/razorpay';
 import {
   markRazorpayPaymentCaptured,
-  markRazorpayPaymentFailed,
 } from '@/lib/order-payments';
 
 export const runtime = 'nodejs';
@@ -73,11 +72,22 @@ export async function POST(request) {
     }
 
     if (payment.status === 'failed') {
-      await markRazorpayPaymentFailed({
+      return jsonError('This payment attempt failed. You may retry in Razorpay Checkout; your order remains pending until the checkout session is closed or reconciled.', 402);
+    }
+
+    if (payment.status === 'authorized') {
+      const { markRazorpayPaymentAuthorized } = await import('@/lib/order-payments');
+      await markRazorpayPaymentAuthorized({
         gatewayOrderId,
         gatewayPaymentId: paymentId,
       });
-      return jsonError('The payment failed. Your order was cancelled and reserved stock was released. You can try checkout again.', 402);
+      return NextResponse.json(
+        {
+          paymentStatus: 'PENDING',
+          message: 'Your payment is authorised and awaiting capture. The order remains pending until Razorpay confirms capture.',
+        },
+        { status: 202 }
+      );
     }
 
     if (payment.status !== 'captured' || payment.captured !== true) {
