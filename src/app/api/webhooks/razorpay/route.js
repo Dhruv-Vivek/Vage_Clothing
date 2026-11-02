@@ -73,8 +73,30 @@ export async function POST(request) {
       null;
 
     if (['payment.captured', 'payment.failed', 'payment.authorized'].includes(event.event)) {
+      // This Razorpay account may receive events for other integrations too.
+      // A valid but unrelated payment must be acknowledged, not retried forever.
       if (!paymentEntity?.id || !paymentEntity?.order_id) {
-        throw new Error('Payment webhook is missing payment or Razorpay order identifiers.');
+        await pool.execute(
+          `UPDATE razorpay_webhook_events
+           SET processing_status = 'PROCESSED', processed_at = NOW()
+           WHERE provider_event_id = ?`,
+          [providerEventId]
+        );
+        return NextResponse.json({ received: true, ignored: true });
+      }
+
+      const [knownOrders] = await pool.execute(
+        'SELECT order_payment_gateway_id FROM order_payment_gateways WHERE gateway_order_id = ? LIMIT 1',
+        [paymentEntity.order_id]
+      );
+      if (!knownOrders.length) {
+        await pool.execute(
+          `UPDATE razorpay_webhook_events
+           SET processing_status = 'PROCESSED', processed_at = NOW()
+           WHERE provider_event_id = ?`,
+          [providerEventId]
+        );
+        return NextResponse.json({ received: true, ignored: true });
       }
 
       // Re-fetch on failure/authorisation events. Webhooks can arrive out of order;
