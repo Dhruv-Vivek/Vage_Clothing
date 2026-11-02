@@ -91,6 +91,7 @@ export async function POST(request) {
           amount: livePayment.amount,
           currency: livePayment.currency,
           signatureVerified: true,
+          dispatchEmails: false,
         });
       } else if (livePayment.status === 'authorized') {
         const { markRazorpayPaymentAuthorized } = await import('@/lib/order-payments');
