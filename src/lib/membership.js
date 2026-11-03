@@ -435,14 +435,3 @@ export async function markMembershipPurchaseCaptured({
   }
 }
 
-export async function cancelQueuedMembership(userId, membershipId) {
-  const [result] = await getPool().execute(
-    "UPDATE user_memberships SET status = 'CANCELLED', cancelled_at = NOW() " +
-    "WHERE membership_id = ? AND user_id = ? AND status = 'ACTIVE' AND starts_at > NOW()",
-    [membershipId, userId]
-  );
-  if (result.affectedRows !== 1) {
-    throw new Error('Only a future queued renewal can be cancelled. Current memberships remain active until expiry; auto-renewal is not enabled.');
-  }
-  return { cancelled: true };
-}
