@@ -57,8 +57,8 @@ export default function ContactForm() {
                   <span className="w-11 h-11 rounded-full bg-white/5 flex items-center justify-center"><Mail className="w-5 h-5 text-white"/></span>
                   <div className="min-w-0">
                     <p className="text-white font-medium">Email</p>
-                    <a href="mailto:vageclothing2@hmail.com" className="mt-1 inline-block break-all text-sm text-light-gray transition-colors hover:text-white hover:underline">
-                      vageclothing2@hmail.com
+                    <a href="mailto:vageclothing2@gmail.com" className="mt-1 inline-block break-all text-sm text-light-gray transition-colors hover:text-white hover:underline">
+                      vageclothing2@gmail.com
                     </a>
                   </div>
                 </div>
