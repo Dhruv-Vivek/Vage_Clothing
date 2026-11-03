@@ -14,7 +14,15 @@ Example address: vageclothing@gmail.com (only if available). Create a dedicated 
 
 Failed, pending, abandoned and cancelled payments do not generate paid-order emails.
 
-## 1. Create the VAGE Gmail account
+## 1. Apply the Contact Us database migration
+
+After pulling this branch, open and execute the following file in MySQL Workbench:
+
+`database/vage-gmail-contact-migration.sql`
+
+It creates the contact_messages table used to persist customer enquiries and track notification/acknowledgement email delivery. It is additive and does not modify existing users, orders, products or inventory.
+
+## 2. Create the VAGE Gmail account
 
 1. Open https://accounts.google.com/signup
 2. Create a dedicated VAGE mailbox such as vageclothing@gmail.com, if it is available.
@@ -24,7 +32,7 @@ Failed, pending, abandoned and cancelled payments do not generate paid-order ema
 
 Do not use your normal Gmail password in the application.
 
-## 2. Generate a Google App Password
+## 3. Generate a Google App Password
 
 Gmail SMTP requires an App Password for this Nodemailer setup. Google requires 2-Step Verification before the App Password option appears. App Passwords are not offered for every account (for example, some Advanced Protection or managed accounts).
 
@@ -37,7 +45,7 @@ Google describes App Passwords as a fallback for apps that cannot use Sign in wi
 
 Official Google guidance: https://support.google.com/mail/answer/185833
 
-## 3. Configure local environment
+## 4. Configure local environment
 
 Append these settings to the existing .env.local. Keep all existing database, JWT, payment and cron settings unchanged.
 
@@ -51,7 +59,7 @@ Replace the sample address with the exact Gmail address you created. VAGE_CONTAC
 
 The app uses Gmail SMTP through Nodemailer. The account's normal password is never used. These variables are server-side only and must never use NEXT_PUBLIC_ prefixes.
 
-## 4. Order confirmation and payment receipt
+## 5. Order confirmation and payment receipt
 
 When the order is marked PAID after server-side payment verification:
 
@@ -63,7 +71,7 @@ When the order is marked PAID after server-side payment verification:
 
 An email failure never changes a paid order back to unpaid. The outbox has a bounded retry policy and supports manual retry from the customer's paid order page.
 
-## 5. Contact Us messages
+## 6. Contact Us messages
 
 The Contact page saves each valid submission to the contact_messages MySQL table.
 
@@ -75,7 +83,7 @@ If Gmail is temporarily unavailable, the message remains saved in MySQL. Notific
 
 The form includes server-side validation, a honeypot field and a per-email hourly submission limit.
 
-## 6. Gmail sending limits
+## 7. Gmail sending limits
 
 Personal Gmail accounts have daily sending and recipient limits. Google documents a standard limit of 500 messages/recipients per day for many consumer account scenarios; the precise limits depend on account type and usage. This mailbox is intended for the low-volume VAGE college demonstration, not bulk production marketing or high-volume transactional traffic.
 
@@ -83,7 +91,7 @@ Google limits guidance: https://support.google.com/mail/answer/22839
 
 For a production store with larger order volume, use a dedicated transactional mail service and a verified domain.
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 If an order email fails, use the order-success page's Order emails section and Retry order emails action.
 
