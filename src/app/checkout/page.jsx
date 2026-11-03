@@ -99,6 +99,7 @@ function Checkout() {
     pincode: '',
   });
   const [selectedDelivery, setSelectedDelivery] = useState('standard');
+  const [couponCode, setCouponCode] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [paymentMessage, setPaymentMessage] = useState('');
@@ -244,6 +245,7 @@ function Checkout() {
           })),
           shippingInfo,
           deliveryMethod: selectedDelivery,
+          couponCode: couponCode.trim(),
         }),
       });
 
@@ -617,11 +619,11 @@ function Checkout() {
                       disabled={isProcessing || hasMissingVariant}
                       className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all disabled:opacity-50"
                     >
-                      {isProcessing ? 'Preparing secure payment…' : `Pay ${formatPrice(estimatedTotal)} (estimate)`}
+                      {isProcessing ? 'Preparing secure payment…' : 'Continue to secure payment'}
                     </button>
                   </div>
                   <p className="text-light-gray text-xs mt-4">
-                    The amount shown here is an estimate. The final price, stock, membership discount and delivery fee are recalculated by the server before the configured provider opens.
+                    Your final total is recalculated securely from MySQL. The exact payable amount is shown by the payment provider before you confirm.
                   </p>
                 </motion.div>
               )}
@@ -650,6 +652,25 @@ function Checkout() {
                       </p>
                     </div>
                   ))}
+                </div>
+
+                <div className="mb-5 rounded-xl border border-dark-border bg-dark p-4">
+                  <label htmlFor="checkout-coupon" className="mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-light-gray">
+                    Promo code
+                  </label>
+                  <input
+                    id="checkout-coupon"
+                    type="text"
+                    maxLength={40}
+                    value={couponCode}
+                    onChange={(event) => setCouponCode(event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40))}
+                    placeholder="Enter coupon code"
+                    autoComplete="off"
+                    className="w-full rounded-lg border border-dark-border bg-dark-secondary px-3 py-3 text-sm uppercase tracking-wider text-white outline-none transition placeholder:normal-case placeholder:tracking-normal placeholder:text-light-gray/50 focus:border-white"
+                  />
+                  <p className="mt-2 text-xs leading-5 text-light-gray/70">
+                    Coupon eligibility and discount are verified securely when you continue to payment.
+                  </p>
                 </div>
 
                 <div className="border-t border-dark-border pt-4 space-y-3">
