@@ -329,6 +329,32 @@ export async function dispatchPaidOrderEmails(orderId) {
     throw new Error('A valid order ID is required to dispatch order emails.');
   }
 
+  // Recreate missing outbox rows for older PAID orders created before email
+  // queuing was enabled (INSERT IGNORE keeps this safe under concurrent retries).
+  const [paidOrders] = await pool.execute(
+    `SELECT o.order_id, o.order_number, u.email
+     FROM orders o
+     INNER JOIN users u ON u.user_id = o.user_id
+     WHERE o.order_id = ? AND o.payment_status = 'PAID'
+     LIMIT 1`,
+    [numericId]
+  );
+  if (!paidOrders.length) {
+    throw new Error('Transactional order emails can only be queued for a paid order.');
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await enqueuePaidOrderEmails(connection, paidOrders[0]);
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+
   const [rows] = await pool.execute(
     `SELECT email_outbox_id, dedupe_key, event_type, recipient_email,
             subject, payload, status
