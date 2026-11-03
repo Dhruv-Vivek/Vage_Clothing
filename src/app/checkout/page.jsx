@@ -94,6 +94,7 @@ function Checkout() {
     email: '',
     phone: '',
     address: '',
+    addressLine2: '',
     city: '',
     state: '',
     pincode: '',
@@ -152,7 +153,8 @@ function Checkout() {
       ...current,
       fullName: address.recipientName || current.fullName,
       phone: digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits.slice(-10),
-      address: [address.addressLine1, address.addressLine2].filter(Boolean).join(', '),
+      address: address.addressLine1 || '',
+      addressLine2: address.addressLine2 || '',
       city: address.city || '',
       state: address.stateName || '',
       pincode: address.postalCode || '',
@@ -533,6 +535,17 @@ function Checkout() {
                         maxLength={200}
                         value={shippingInfo.address}
                         onChange={(event) => updateShipping('address', event.target.value)}
+                        className="w-full px-4 py-3 bg-dark border border-dark-border rounded-lg text-white focus:outline-none focus:border-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-white mb-2">Apartment / Landmark (optional)</label>
+                      <input
+                        type="text"
+                        maxLength={200}
+                        value={shippingInfo.addressLine2}
+                        onChange={(event) => updateShipping('addressLine2', event.target.value)}
                         className="w-full px-4 py-3 bg-dark border border-dark-border rounded-lg text-white focus:outline-none focus:border-white"
                       />
                     </div>
