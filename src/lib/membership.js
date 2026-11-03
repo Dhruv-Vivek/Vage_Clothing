@@ -170,6 +170,17 @@ export async function getMembershipPurchaseOwner(userId, paymentId) {
   return rows[0] || null;
 }
 
+export async function getMembershipPurchaseOwner(userId, paymentId) {
+  const [rows] = await getPool().execute(
+    "SELECT mpt.membership_payment_id, mpt.membership_id, mpt.gateway_order_id, mpt.gateway_payment_id, " +
+    "mpt.amount, mpt.currency, mpt.status, um.user_id " +
+    "FROM membership_payment_transactions mpt INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
+    "WHERE mpt.membership_payment_id = ? AND um.user_id = ? AND mpt.gateway = 'RAZORPAY' LIMIT 1",
+    [paymentId, userId]
+  );
+  return rows[0] || null;
+}
+
 export async function createMembershipPurchase(user, planCode, idempotencyKey) {
   const code = String(planCode || '').trim().toLowerCase();
   if (!/^[a-z0-9_-]{2,30}$/.test(code)) throw new Error('Choose a valid membership plan.');
