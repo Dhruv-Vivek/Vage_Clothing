@@ -5,6 +5,9 @@ USE vage_clothing;
 CREATE TABLE IF NOT EXISTS membership_plans (
   plan_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   plan_code VARCHAR(30) NOT NULL,
+  plan_name VARCHAR(40) NOT NULL,
+  annual_price DECIMAL(10,2) NOT NULL,
+  features JSON NOT NULL,
   display_name VARCHAR(60) NOT NULL,
   price_amount DECIMAL(10,2) NOT NULL,
   duration_days INT UNSIGNED NOT NULL DEFAULT 365,
@@ -24,6 +27,21 @@ CREATE TABLE IF NOT EXISTS membership_plans (
 -- Older VAGE installations may already have membership_plans because checkout
 -- reads discount_percent/free_shipping_* from it. Add the purchase-display fields
 -- without replacing any existing benefits or prices.
+SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_plans' AND column_name='plan_name')=0,
+  'ALTER TABLE membership_plans ADD COLUMN plan_name VARCHAR(40) NULL AFTER plan_code',
+  'SELECT ''membership_plans.plan_name already exists'' AS migration_note');
+PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
+
+SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_plans' AND column_name='annual_price')=0,
+  'ALTER TABLE membership_plans ADD COLUMN annual_price DECIMAL(10,2) NULL',
+  'SELECT ''membership_plans.annual_price already exists'' AS migration_note');
+PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
+
+SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_plans' AND column_name='features')=0,
+  'ALTER TABLE membership_plans ADD COLUMN features JSON NULL',
+  'SELECT ''membership_plans.features already exists'' AS migration_note');
+PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
+
 SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_plans' AND column_name='display_name')=0,
   'ALTER TABLE membership_plans ADD COLUMN display_name VARCHAR(60) NULL AFTER plan_code',
   'SELECT ''membership_plans.display_name already exists'' AS migration_note');
@@ -46,59 +64,63 @@ PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
 
 -- A separate purchase record prevents membership payments from being confused
 -- with product orders/payments. Razorpay webhooks can identify either entity.
-CREATE TABLE IF NOT EXISTS membership_purchases (
-  purchase_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  plan_id BIGINT UNSIGNED NOT NULL,
-  purchase_type ENUM('NEW','RENEWAL') NOT NULL DEFAULT 'NEW',
-  idempotency_key VARCHAR(80) NOT NULL,
+CREATE TABLE IF NOT EXISTS membership_payment_transactions (
+  membership_payment_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  membership_id BIGINT UNSIGNED NOT NULL,
   gateway VARCHAR(20) NOT NULL DEFAULT 'RAZORPAY',
-  gateway_order_id VARCHAR(80) DEFAULT NULL,
+  gateway_order_id VARCHAR(80) NOT NULL,
   gateway_payment_id VARCHAR(80) DEFAULT NULL,
-  amount DECIMAL(10,2) NOT NULL,
+  amount DECIMAL(12,2) NOT NULL,
   currency CHAR(3) NOT NULL DEFAULT 'INR',
-  status ENUM('CREATED','AUTHORIZED','CAPTURED','FAILED') NOT NULL DEFAULT 'CREATED',
+  status ENUM('CREATED','AUTHORIZED','CAPTURED','FAILED','REFUNDED') NOT NULL DEFAULT 'CREATED',
+  purchase_type ENUM('NEW','RENEWAL') NOT NULL DEFAULT 'NEW',
+  idempotency_key VARCHAR(80) DEFAULT NULL,
   signature_verified TINYINT(1) NOT NULL DEFAULT 0,
+  paid_at DATETIME DEFAULT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  paid_at DATETIME DEFAULT NULL,
-  PRIMARY KEY (purchase_id),
-  UNIQUE KEY uq_membership_purchase_user_idem (user_id, idempotency_key),
-  UNIQUE KEY uq_membership_purchase_gateway_order (gateway_order_id),
-  UNIQUE KEY uq_membership_purchase_gateway_payment (gateway_payment_id),
-  KEY idx_membership_purchase_user_date (user_id, created_at),
-  KEY idx_membership_purchase_status_date (status, created_at),
-  CONSTRAINT fk_membership_purchase_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT fk_membership_purchase_plan FOREIGN KEY (plan_id) REFERENCES membership_plans(plan_id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT chk_membership_purchase_amount CHECK (amount > 0)
+  PRIMARY KEY (membership_payment_id),
+  UNIQUE KEY uq_membership_gateway_order (gateway_order_id),
+  UNIQUE KEY uq_membership_gateway_payment (gateway_payment_id),
+  UNIQUE KEY uq_membership_payment_idempotency (idempotency_key),
+  KEY idx_membership_payment_status (membership_id, status),
+  CONSTRAINT fk_membership_payment_membership FOREIGN KEY (membership_id) REFERENCES user_memberships(membership_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT chk_membership_payment_amount CHECK (amount > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS user_memberships (
   membership_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id BIGINT UNSIGNED NOT NULL,
   plan_id BIGINT UNSIGNED NOT NULL,
-  purchase_id BIGINT UNSIGNED DEFAULT NULL,
-  status ENUM('ACTIVE','EXPIRED','CANCELLED') NOT NULL DEFAULT 'ACTIVE',
-  starts_at DATETIME NOT NULL,
-  expires_at DATETIME NOT NULL,
+  status ENUM('PENDING','ACTIVE','CANCELLED','EXPIRED','FAILED') NOT NULL DEFAULT 'PENDING',
+  starts_at DATETIME DEFAULT NULL,
+  expires_at DATETIME DEFAULT NULL,
+  activated_at DATETIME DEFAULT NULL,
   cancelled_at DATETIME DEFAULT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (membership_id),
-  UNIQUE KEY uq_user_membership_purchase (purchase_id),
-  KEY idx_user_membership_active (user_id, status, starts_at, expires_at),
-  CONSTRAINT fk_user_membership_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT fk_user_membership_plan FOREIGN KEY (plan_id) REFERENCES membership_plans(plan_id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT fk_user_membership_purchase FOREIGN KEY (purchase_id) REFERENCES membership_purchases(purchase_id) ON DELETE SET NULL ON UPDATE CASCADE,
-  CONSTRAINT chk_user_membership_dates CHECK (expires_at > starts_at)
+  KEY idx_user_memberships_current (user_id, status, expires_at),
+  KEY idx_user_memberships_plan (plan_id, status),
+  CONSTRAINT fk_user_memberships_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_user_memberships_plan FOREIGN KEY (plan_id) REFERENCES membership_plans(plan_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT chk_user_membership_dates CHECK (expires_at IS NULL OR starts_at IS NULL OR expires_at > starts_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- Backwards-compatible support for installations with a pre-existing user_memberships
--- table. The checkout code already expects status/starts_at/expires_at; this adds
--- only the purchase reference and cancellation timestamp if they are absent.
-SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='user_memberships' AND column_name='purchase_id')=0,
-  'ALTER TABLE user_memberships ADD COLUMN purchase_id BIGINT UNSIGNED NULL',
-  'SELECT ''user_memberships.purchase_id already exists'' AS migration_note');
+-- Existing Batch 5-6 membership tables are retained. Add payment idempotency metadata.
+SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_payment_transactions' AND column_name='purchase_type')=0,
+  "ALTER TABLE membership_payment_transactions ADD COLUMN purchase_type ENUM('NEW','RENEWAL') NOT NULL DEFAULT 'NEW'",
+  'SELECT ''membership_payment_transactions.purchase_type exists'' AS migration_note');
+PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
+
+SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_payment_transactions' AND column_name='idempotency_key')=0,
+  'ALTER TABLE membership_payment_transactions ADD COLUMN idempotency_key VARCHAR(80) NULL',
+  'SELECT ''membership_payment_transactions.idempotency_key exists'' AS migration_note');
+PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
+
+SET @ddl = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='membership_payment_transactions' AND index_name='uq_membership_payment_idempotency')=0,
+  'ALTER TABLE membership_payment_transactions ADD UNIQUE KEY uq_membership_payment_idempotency (idempotency_key)',
+  'SELECT ''membership payment idempotency index exists'' AS migration_note');
 PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
 
 SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='user_memberships' AND column_name='cancelled_at')=0,
@@ -114,13 +136,16 @@ PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
 -- Fill purchase-facing fields only when they are NULL. Existing configured prices,
 -- discounts and shipping benefits are preserved.
 INSERT INTO membership_plans
-  (plan_code, display_name, price_amount, duration_days, discount_percent,
-   free_shipping_minimum, free_shipping_methods, is_active)
+  (plan_code, plan_name, annual_price, features, display_name, price_amount, duration_days,
+   discount_percent, free_shipping_minimum, free_shipping_methods, is_active)
 VALUES
-  ('basic', 'Basic', 599.00, 365, 10.00, 2000.00, JSON_ARRAY('standard','express','priority'), 1),
-  ('premium', 'Premium', 1299.00, 365, 20.00, 0.00, JSON_ARRAY('standard','express','priority'), 1),
-  ('vip', 'VIP', 1599.00, 365, 30.00, 0.00, JSON_ARRAY('standard','express','priority'), 1)
+  ('basic', 'Basic', 599.00, JSON_ARRAY('10% discount on products','Free standard shipping above ₹2000','Priority email support','Member-only sales'), 'Basic', 599.00, 365, 10.00, 2000.00, JSON_ARRAY('standard'), 1),
+  ('premium', 'Premium', 1299.00, JSON_ARRAY('20% discount on products','Free standard shipping','Early collection access','Priority support','Birthday offers'), 'Premium', 1299.00, 365, 20.00, 0.00, JSON_ARRAY('standard'), 1),
+  ('vip', 'VIP', 1599.00, JSON_ARRAY('30% discount on products','Free express shipping','Limited edition access','Personal style consultant','VIP events'), 'VIP', 1599.00, 365, 30.00, 0.00, JSON_ARRAY('standard','express'), 1)
 ON DUPLICATE KEY UPDATE
+  plan_name = COALESCE(plan_name, VALUES(plan_name)),
+  annual_price = COALESCE(annual_price, VALUES(annual_price)),
+  features = COALESCE(features, VALUES(features)),
   display_name = COALESCE(display_name, VALUES(display_name)),
   price_amount = COALESCE(price_amount, VALUES(price_amount)),
   duration_days = COALESCE(duration_days, VALUES(duration_days));
