@@ -22,10 +22,11 @@ Do not use DEMO in production. The server rejects demo OTP routes when productio
 1. Complete VAGE shipping and delivery.
 2. VAGE sends the order to the new `/demo-payment?orderId=...` screen.
 3. Choose UPI, Card, Net Banking or Wallet.
-4. Request a demo OTP; the page displays the fixed code `111000`.
+4. Request a demo OTP; the page displays the fixed code `111000` (it is not sent by SMS or email).
 5. Enter the OTP and choose an outcome (success, failed, pending or user dropped).
-6. Server checks the user/order, session token, OTP, expiry and a five-attempt limit before finalising the selected outcome.
+6. The server checks the signed-in user, order ownership, session token, salted OTP hash, five-minute expiry and five-attempt limit before consuming the OTP session.
 7. Success uses the shared MySQL order finalisation without queueing or sending email notifications. Automated order emails are intentionally deferred to a later phase.
+8. The order-success page explicitly labels the transaction as a demo and does not show email delivery failures for this flow.
 
 This is a visibly labelled simulation. The fixed OTP is not a real phone/email OTP and proves no ownership of an external mailbox or phone number.
 
