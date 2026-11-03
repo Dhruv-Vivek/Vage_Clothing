@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Crown, Star, Zap, ShieldCheck, RefreshCw, CalendarDays, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -51,7 +51,6 @@ export default function Membership() {
   const [loading, setLoading] = useState(true);
   const [busyPlan, setBusyPlan] = useState('');
   const [message, setMessage] = useState(null);
-  const activePurchase = useRef(null);
 
   const loadMembership = useCallback(async () => {
     setLoading(true);
@@ -105,7 +104,6 @@ export default function Membership() {
     }
     setBusyPlan(plan.code);
     setMessage(null);
-    activePurchase.current = null;
 
     try {
       const response = await fetch('/api/membership/purchases', {
@@ -117,7 +115,6 @@ export default function Membership() {
       });
       const purchase = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(purchase.error || 'Unable to start membership purchase.');
-      activePurchase.current = purchase;
 
       await loadRazorpayScript();
       const checkout = new window.Razorpay({
@@ -169,7 +166,6 @@ export default function Membership() {
               setMessage({ type: 'error', text: 'Unable to reconcile the closed checkout. Refresh membership status before trying again.' });
             } finally {
               setBusyPlan('');
-              activePurchase.current = null;
             }
           },
         },
@@ -205,6 +201,38 @@ export default function Membership() {
 
   const current = summary?.current;
   const queued = summary?.queued;
+  const pendingPayments = (summary?.payments || []).filter((payment) =>
+    ['CREATED', 'AUTHORIZED'].includes(String(payment.status).toUpperCase())
+  );
+
+  const reconcilePendingPayment = async (payment) => {
+    setBusyPlan('reconcile');
+    setMessage(null);
+    try {
+      const response = await fetch('/api/membership/abandon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({ purchaseId: payment.paymentId }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Unable to check this payment.');
+      if (result.paymentStatus === 'PAID') {
+        setMessage({ type: 'success', text: 'Payment captured. Your membership is active.' });
+        await refresh();
+      } else if (result.paymentStatus === 'PENDING') {
+        setMessage({ type: 'pending', text: result.message || 'Payment is authorised and awaiting capture.' });
+      } else {
+        setMessage({ type: 'error', text: 'Payment was not captured. You can start a new membership purchase.' });
+      }
+      await loadMembership();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Unable to reconcile payment.' });
+    } finally {
+      setBusyPlan('');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-dark">
@@ -251,6 +279,30 @@ export default function Membership() {
             </section>
           )}
 
+          {isLoggedIn && pendingPayments.length > 0 && (
+            <section className="mb-10 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6">
+              <h2 className="text-lg font-semibold text-white">Payment needs confirmation</h2>
+              <p className="mt-2 text-sm text-light-gray">A previous membership payment is not final yet. Check its status before starting another purchase.</p>
+              <div className="mt-5 space-y-3">
+                {pendingPayments.map((payment) => (
+                  <div key={payment.paymentId} className="flex flex-col gap-3 border-t border-dark-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-medium text-white">{payment.plan} · {formatPrice(payment.amount)}</p>
+                      <p className="text-xs text-light-gray">{payment.purchaseType} · {payment.status} · {formatDate(payment.createdAt)}</p>
+                    </div>
+                    <button
+                      onClick={() => reconcilePendingPayment(payment)}
+                      disabled={busyPlan === 'reconcile'}
+                      className="rounded-lg border border-white/60 px-4 py-2 text-sm text-white hover:bg-white hover:text-black disabled:opacity-40"
+                    >
+                      {busyPlan === 'reconcile' ? 'Checking…' : 'Check payment status'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {loading ? (
             <div className="py-20 text-center text-light-gray">Loading membership plans…</div>
           ) : plans.length === 0 ? (
@@ -262,7 +314,7 @@ export default function Membership() {
                 const recommended = plan.code === 'premium';
                 const canRenew = current && current.code === plan.code && current.daysLeft <= 30;
                 const isCurrentPlan = current?.code === plan.code;
-                const disabled = Boolean(busyPlan) || (current && !canRenew) || (queued && !isCurrentPlan);
+                const disabled = Boolean(busyPlan) || pendingPayments.length > 0 || Boolean(queued) || (current && !canRenew);
                 return (
                   <motion.article
                     key={plan.planId}
@@ -295,8 +347,10 @@ export default function Membership() {
                         (recommended ? 'bg-white text-black hover:bg-lighter-gray' : 'border border-white text-white hover:bg-white hover:text-black')}
                     >
                       {busyPlan === plan.code ? 'Opening secure checkout…' :
-                        isCurrentPlan && !canRenew ? 'Already active' :
-                          isCurrentPlan && canRenew ? 'Renew membership' : 'Subscribe securely'}
+                        pendingPayments.length > 0 ? 'Resolve payment above' :
+                          queued ? 'Renewal already queued' :
+                            isCurrentPlan && !canRenew ? 'Already active' :
+                              isCurrentPlan && canRenew ? 'Renew membership' : 'Subscribe securely'}
                     </button>
                   </motion.article>
                 );
