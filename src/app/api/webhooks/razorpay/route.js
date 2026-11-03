@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { getPool } from '@/lib/db';
-import { getRazorpay, verifyWebhookSignature } from '@/lib/razorpay';
-import {
-  markRazorpayPaymentCaptured,
-} from '@/lib/order-payments';
+import { verifyWebhookSignature } from '@/lib/razorpay';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,6 +10,10 @@ function jsonError(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+/**
+ * Verify and durably store Razorpay events, then acknowledge immediately.
+ * Provider API calls and order mutations are handled by the scheduled worker.
+ */
 export async function POST(request) {
   const rawBody = await request.text();
   if (!rawBody || Buffer.byteLength(rawBody, 'utf8') > 1024 * 1024) {
@@ -36,7 +37,7 @@ export async function POST(request) {
     return jsonError('Webhook body is not valid JSON.', 400);
   }
 
-  if (!event || typeof event.event !== 'string' || !event.payload) {
+  if (!event || typeof event.event !== 'string' || !event.payload || typeof event.payload !== 'object') {
     return jsonError('Unsupported webhook payload.', 400);
   }
 
@@ -47,103 +48,32 @@ export async function POST(request) {
 
   const pool = getPool();
   try {
+    // A duplicate delivery does not reset a PROCESSING/PROCESSED event or
+    // increment processing attempts. The unique key closes concurrent races.
     await pool.execute(
       `INSERT INTO razorpay_webhook_events
          (provider_event_id, event_type, payload, processing_status, attempts)
-       VALUES (?, ?, ?, 'RECEIVED', 1)
-       ON DUPLICATE KEY UPDATE
-         attempts = attempts + 1,
-         processing_status = IF(processing_status = 'PROCESSED', 'PROCESSED', 'RECEIVED'),
-         last_error = NULL`,
+       VALUES (?, ?, ?, 'RECEIVED', 0)
+       ON DUPLICATE KEY UPDATE provider_event_id = VALUES(provider_event_id)`,
       [providerEventId, event.event, rawBody]
     );
 
     const [stored] = await pool.execute(
-      'SELECT processing_status FROM razorpay_webhook_events WHERE provider_event_id = ? LIMIT 1',
+      `SELECT processing_status
+       FROM razorpay_webhook_events
+       WHERE provider_event_id = ?
+       LIMIT 1`,
       [providerEventId]
     );
 
-    if (stored[0]?.processing_status === 'PROCESSED') {
-      return NextResponse.json({ received: true, duplicate: true });
-    }
-
-    const paymentEntity =
-      event.payload?.payment?.entity ||
-      event.payload?.order?.entity?.payments?.items?.[0] ||
-      null;
-
-    if (['payment.captured', 'payment.failed', 'payment.authorized'].includes(event.event)) {
-      // This Razorpay account may receive events for other integrations too.
-      // A valid but unrelated payment must be acknowledged, not retried forever.
-      if (!paymentEntity?.id || !paymentEntity?.order_id) {
-        await pool.execute(
-          `UPDATE razorpay_webhook_events
-           SET processing_status = 'PROCESSED', processed_at = NOW()
-           WHERE provider_event_id = ?`,
-          [providerEventId]
-        );
-        return NextResponse.json({ received: true, ignored: true });
-      }
-
-      const [knownOrders] = await pool.execute(
-        'SELECT order_payment_gateway_id FROM order_payment_gateways WHERE gateway_order_id = ? LIMIT 1',
-        [paymentEntity.order_id]
-      );
-      if (!knownOrders.length) {
-        await pool.execute(
-          `UPDATE razorpay_webhook_events
-           SET processing_status = 'PROCESSED', processed_at = NOW()
-           WHERE provider_event_id = ?`,
-          [providerEventId]
-        );
-        return NextResponse.json({ received: true, ignored: true });
-      }
-
-      // Re-fetch on failure/authorisation events. Webhooks can arrive out of order;
-      // only the live captured state may mark an order paid.
-      const livePayment = await getRazorpay().payments.fetch(paymentEntity.id);
-      if (livePayment.order_id !== paymentEntity.order_id) {
-        throw new Error('Fetched payment does not match the webhook order.');
-      }
-
-      if (livePayment.status === 'captured' && livePayment.captured === true) {
-        await markRazorpayPaymentCaptured({
-          gatewayOrderId: livePayment.order_id,
-          gatewayPaymentId: livePayment.id,
-          amount: livePayment.amount,
-          currency: livePayment.currency,
-          signatureVerified: true,
-          dispatchEmails: false,
-        });
-      } else if (livePayment.status === 'authorized') {
-        const { markRazorpayPaymentAuthorized } = await import('@/lib/order-payments');
-        await markRazorpayPaymentAuthorized({
-          gatewayOrderId: livePayment.order_id,
-          gatewayPaymentId: livePayment.id,
-        });
-      }
-      // A failed attempt does not cancel the order here: Razorpay may still
-      // accept another attempt in the same Checkout session. Reconcile only
-      // after the customer dismisses Checkout or through the stale-order job.
-    }
-
-    await pool.execute(
-      `UPDATE razorpay_webhook_events
-       SET processing_status = 'PROCESSED', processed_at = NOW(), last_error = NULL
-       WHERE provider_event_id = ?`,
-      [providerEventId]
-    );
-
-    return NextResponse.json({ received: true });
+    return NextResponse.json({
+      received: true,
+      queued: stored[0]?.processing_status !== 'PROCESSED',
+      duplicate: stored[0]?.processing_status === 'PROCESSED',
+    });
   } catch (error) {
-    const message = String(error?.message || 'Webhook processing failed.').slice(0, 950);
-    await pool.execute(
-      `UPDATE razorpay_webhook_events
-       SET processing_status = 'FAILED', last_error = ?
-       WHERE provider_event_id = ?`,
-      [message, providerEventId]
-    ).catch(() => undefined);
-    console.error('[POST /api/webhooks/razorpay] Processing failed:', error);
-    return jsonError('Webhook processing failed. Razorpay may retry delivery.', 500);
+    console.error('[POST /api/webhooks/razorpay] Durable event intake failed:', error);
+    // A 5xx response tells Razorpay that the event was not durably accepted.
+    return jsonError('Webhook event could not be stored. Razorpay may retry delivery.', 503);
   }
 }
