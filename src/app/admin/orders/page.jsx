@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Search, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import AdminShell from '@/components/admin/AdminShell';
 
@@ -34,7 +34,7 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const load = async (page = 1) => {
+  const load = useCallback(async (page = 1) => {
     setLoading(true);
     setError('');
     try {
@@ -52,9 +52,9 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [query, status, paymentStatus]);
 
-  useEffect(() => { load(1); }, [query, status, paymentStatus]);
+  useEffect(() => { load(1); }, [load]);
 
   return (
     <AdminShell title="Orders" description="Search and review customer orders, fulfilment progress and verified payment status.">
