@@ -17,6 +17,7 @@ function OrderSuccess() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const orderId = searchParams.get('orderId');
+  const provider = String(searchParams.get('provider') || '').toUpperCase();
   const [orderData, setOrderData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -34,8 +35,21 @@ function OrderSuccess() {
     let timer;
     let attempts = 0;
 
+    let providerVerificationAttempted = false;
+
     async function refreshOrder() {
       try {
+        if (provider === 'CASHFREE' && !providerVerificationAttempted) {
+          providerVerificationAttempted = true;
+          await fetch('/api/payments/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+            body: JSON.stringify({ orderId: Number(orderId) }),
+          }).catch(() => undefined);
+        }
+
         const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
           cache: 'no-store',
           credentials: 'same-origin',
@@ -65,7 +79,7 @@ function OrderSuccess() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [orderId]);
+  }, [orderId, provider]);
 
   const resendEmails = async () => {
     if (!orderId) return;
@@ -98,7 +112,11 @@ function OrderSuccess() {
     ? 'Your payment has been verified and your order is confirmed.'
     : failed
       ? 'The payment was not completed. Your order has been cancelled and reserved stock was released.'
-      : 'Razorpay has returned you to VAGE. We are checking the payment status with the server. Please do not pay again while this check is pending.';
+      : (order?.payment_provider === 'CASHFREE' || provider === 'CASHFREE')
+      ? 'Cashfree has returned you to VAGE. We are checking the payment status with the server. Please do not pay again while this check is pending.'
+      : order?.payment_provider === 'DEMO' || provider === 'DEMO'
+        ? 'This is a simulated demo payment. No real money was transferred. The order status shown here comes from VAGE.'
+        : 'Your payment provider has returned you to VAGE. We are checking the status with the server. Please do not pay again while this check is pending.';
 
   return (
     <div className="bg-dark">
