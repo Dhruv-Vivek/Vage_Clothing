@@ -108,6 +108,14 @@ function Navbar() {
             {/* Login/User Button - Corrected placement and logic */}
             {isLoading ? null : isLoggedIn ? (
               <div className="hidden md:flex items-center gap-4">
+                {user.role === 'ADMIN' && (
+                  <Link
+                    href="/admin"
+                    className="px-4 py-2 bg-white text-black rounded-lg text-sm font-medium hover:bg-lighter-gray transition-colors"
+                  >
+                    Admin
+                  </Link>
+                )}
                 <div className="flex items-center gap-2 text-white">
                   <User className="w-5 h-5" />
                   <span className="text-sm font-medium">{user.name}</span>

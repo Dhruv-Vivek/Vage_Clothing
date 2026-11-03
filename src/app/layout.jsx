@@ -2,6 +2,7 @@ import '../index.css';
 import Providers from '../components/Providers';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import HideOnAdmin from '../components/HideOnAdmin';
 
 export const metadata = {
   title: 'VAGE | Clothing',
@@ -18,11 +19,16 @@ export default function RootLayout({ children }) {
       <body>
         <Providers>
           {/* Navbar and Footer live here once instead of inside every page. The Navbar is
-              position:fixed, so it looks exactly as before; the footer is pushed to the bottom. */}
+              position:fixed, so it looks exactly as before; the footer is pushed to the bottom.
+              HideOnAdmin removes both inside /admin, which has its own layout. */}
           <div className="flex min-h-screen flex-col bg-dark">
-            <Navbar />
+            <HideOnAdmin>
+              <Navbar />
+            </HideOnAdmin>
             <main className="flex-1">{children}</main>
-            <Footer />
+            <HideOnAdmin>
+              <Footer />
+            </HideOnAdmin>
           </div>
         </Providers>
       </body>
