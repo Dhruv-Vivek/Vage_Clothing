@@ -206,7 +206,7 @@ export async function POST(request) {
         currency: 'INR',
         signatureVerified: false,
         queueEmails: true,
-        dispatchEmails: true,
+        dispatchEmails: false,
       });
 
       return NextResponse.json({
