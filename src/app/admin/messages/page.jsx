@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Mail, RefreshCw, Search } from 'lucide-react';
 import AdminShell from '@/components/admin/AdminShell';
 
@@ -25,7 +25,7 @@ export default function AdminMessagesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const load = async (page = 1) => {
+  const load = useCallback(async (page = 1) => {
     setLoading(true);
     setError('');
     try {
@@ -41,9 +41,9 @@ export default function AdminMessagesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [query]);
 
-  useEffect(() => { load(1); }, [query]);
+  useEffect(() => { load(1); }, [load]);
 
   return (
     <AdminShell title="Contact inbox" description="Review messages sent through the VAGE Contact Us form and inspect both email delivery attempts.">
