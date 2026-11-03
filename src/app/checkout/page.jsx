@@ -313,6 +313,7 @@ function Checkout() {
         }
 
         setPaymentMessage('Cashfree Checkout is opening. Your order will be confirmed only after server-side payment verification.');
+        setIsProcessing(false);
         return;
       }
 
