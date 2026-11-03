@@ -3,8 +3,16 @@
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ShoppingCart, Heart, ArrowLeft, Minus, Plus } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCart } from '@/context/CartContext';
+
+function formatPrice(value) {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
 
 function ProductDetail() {
   const { id } = useParams();
@@ -12,6 +20,7 @@ function ProductDetail() {
   const { addToCart, toggleFavorite, isFavorite } = useCart();
   const [product, setProduct] = useState(null);
   const [variants, setVariants] = useState([]);
+  const [selectedVariantId, setSelectedVariantId] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [isAdded, setIsAdded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -30,8 +39,11 @@ function ProductDetail() {
         });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || 'Product not found.');
+        const loadedVariants = body.variants || [];
         setProduct(body.product);
-        setVariants(body.variants || []);
+        setVariants(loadedVariants);
+        const firstAvailable = loadedVariants.find((variant) => Number(variant.stockQuantity) > 0);
+        setSelectedVariantId(String((firstAvailable || loadedVariants[0])?.variantId || ''));
         setQuantity(1);
       } catch (loadError) {
         if (loadError.name !== 'AbortError') setError(loadError.message);
@@ -49,6 +61,11 @@ function ProductDetail() {
     const timeout = setTimeout(() => setIsAdded(false), 2000);
     return () => clearTimeout(timeout);
   }, [isAdded]);
+
+  const selectedVariant = useMemo(
+    () => variants.find((variant) => String(variant.variantId) === String(selectedVariantId)) || null,
+    [variants, selectedVariantId]
+  );
 
   if (loading) {
     return <div className="min-h-screen bg-dark flex items-center justify-center text-light-gray">Loading product…</div>;
@@ -69,17 +86,12 @@ function ProductDetail() {
   }
 
   const isLiked = isFavorite(product.id);
-  const maxStock = Number(product.availableStock || 0);
-  const canAddToCart = maxStock > 0;
-  const availableSizes = [...new Set(variants.map((variant) => variant.size))];
-  const availableColors = [...new Set(variants.map((variant) => variant.color))];
+  const maxStock = Number(selectedVariant?.stockQuantity || 0);
+  const canAddToCart = Boolean(selectedVariant && maxStock > 0);
 
   const handleAddToCart = () => {
     if (!canAddToCart) return;
-    for (let index = 0; index < Math.min(quantity, maxStock); index += 1) {
-      addToCart(product);
-    }
-    setIsAdded(true);
+    if (addToCart(product, selectedVariant, quantity)) setIsAdded(true);
   };
 
   return (
@@ -118,7 +130,9 @@ function ProductDetail() {
             >
               <p className="text-light-gray text-sm uppercase tracking-wider">{product.category}</p>
               <h1 className="text-4xl md:text-5xl font-bold text-white">{product.name}</h1>
-              <div className="text-4xl font-bold text-white">{product.price}</div>
+              <div className="text-4xl font-bold text-white">
+                {formatPrice(selectedVariant?.unitPrice ?? product.basePrice)}
+              </div>
               <p className="text-light-gray text-lg leading-relaxed">
                 {product.description || 'Premium quality product crafted with attention to detail.'}
               </p>
@@ -140,35 +154,39 @@ function ProductDetail() {
 
               <div className="flex items-center justify-between gap-4">
                 <p className="text-sm text-light-gray">
-                  {canAddToCart ? `${maxStock} units available across variants` : 'Currently out of stock'}
+                  {canAddToCart ? `${maxStock} units available for this variant` : 'This variant is currently out of stock'}
                 </p>
                 <p className="text-sm text-light-gray">{variants.length} variants</p>
               </div>
 
-              {(availableSizes.length > 0 || availableColors.length > 0) && (
-                <div className="space-y-3 py-4 border-b border-dark-border">
-                  {availableSizes.length > 0 && (
-                    <div>
-                      <p className="text-sm text-light-gray mb-2">Available sizes</p>
-                      <div className="flex flex-wrap gap-2">
-                        {availableSizes.map((size) => (
-                          <span key={size} className="px-3 py-1 rounded-md bg-dark-secondary border border-dark-border text-sm text-white">{size}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {availableColors.length > 0 && (
-                    <div>
-                      <p className="text-sm text-light-gray mb-2">Available colours</p>
-                      <div className="flex flex-wrap gap-2">
-                        {availableColors.map((color) => (
-                          <span key={color} className="px-3 py-1 rounded-md bg-dark-secondary border border-dark-border text-sm text-white">{color}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+              <div className="space-y-2 py-4 border-b border-dark-border">
+                <label htmlFor="product-variant" className="block text-white font-medium">
+                  Select size and colour
+                </label>
+                <select
+                  id="product-variant"
+                  value={selectedVariantId}
+                  onChange={(event) => {
+                    setSelectedVariantId(event.target.value);
+                    setQuantity(1);
+                    setIsAdded(false);
+                  }}
+                  disabled={variants.length === 0}
+                  className="w-full px-4 py-3 bg-dark-secondary border border-dark-border rounded-lg text-white focus:outline-none focus:border-white disabled:opacity-50"
+                >
+                  {variants.length === 0 && <option value="">No variants available</option>}
+                  {variants.map((variant) => (
+                    <option key={variant.variantId} value={String(variant.variantId)} disabled={Number(variant.stockQuantity) <= 0}>
+                      {variant.size} / {variant.color} — {formatPrice(variant.unitPrice)} ({variant.stockQuantity > 0 ? `${variant.stockQuantity} in stock` : 'Out of stock'})
+                    </option>
+                  ))}
+                </select>
+                {selectedVariant && (
+                  <p className="text-light-gray text-xs">
+                    SKU: {selectedVariant.sku} · Variant ID: {selectedVariant.variantId}
+                  </p>
+                )}
+              </div>
 
               <div className="space-y-3">
                 <label className="text-white font-medium">Quantity</label>
