@@ -90,6 +90,28 @@ function DemoPaymentContent() {
     return () => window.clearInterval(timer);
   }, [otpSession, remainingSeconds]);
 
+  const cancelCheckout = async () => {
+    if (!orderId || busy) return;
+    setBusy(true);
+    setErrorMessage('');
+    try {
+      const response = await fetch('/api/payments/demo/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({ orderId: Number(orderId) }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Unable to cancel this demo checkout.');
+      router.replace('/cart');
+    } catch (error) {
+      setErrorMessage(error.message || 'Unable to cancel this demo checkout.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const requestOtp = async () => {
     if (!orderId || busy) return;
     setBusy(true);
@@ -199,10 +221,11 @@ function DemoPaymentContent() {
         <div className="max-w-5xl mx-auto">
           <button
             type="button"
-            onClick={() => router.push('/checkout')}
-            className="inline-flex items-center gap-2 text-light-gray hover:text-white mb-8 transition-colors"
+            onClick={cancelCheckout}
+            disabled={busy}
+            className="inline-flex items-center gap-2 text-light-gray hover:text-white mb-8 transition-colors disabled:opacity-50"
           >
-            <ArrowLeft className="w-4 h-4" /> Back to checkout
+            <ArrowLeft className="w-4 h-4" /> Cancel payment & return to cart
           </button>
 
           <div className="text-center mb-10">
