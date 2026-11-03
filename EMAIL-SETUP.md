@@ -1,95 +1,114 @@
-# VAGE Clothing — Transactional Order Emails
+# VAGE Clothing — Dedicated Gmail Mailbox
 
-VAGE sends two transactional emails only after a payment has been confirmed:
+VAGE uses one dedicated Gmail mailbox for both outgoing order notifications and incoming Contact Us messages.
 
-1. **Order confirmation** — order number, purchased items, variants, quantities, discounts, delivery amount, total and shipping address.
-2. **Payment receipt** — the same order details plus payment method, provider, payment reference and payment date.
+Example address: vageclothing@gmail.com (only if available). Create a dedicated store account rather than using a personal mailbox.
 
-Failed, cancelled, pending and abandoned payments do not enqueue either email. A payment being marked PAID is committed to MySQL before email delivery starts. An email-provider failure never reverses a successful payment.
+## What the mailbox does
 
-## 1. Create/configure Resend
+- Sends order confirmation emails to customers after a verified successful payment.
+- Sends payment receipts to customers after a verified successful payment.
+- Receives notifications for Contact Us submissions.
+- Receives customer replies to support conversations.
+- Sends an acknowledgement email to each customer who submits the Contact Us form.
 
-1. Create or sign in to your account at https://resend.com/.
-2. Open **API Keys** and create a server-side API key with permission to send email.
-3. Open **Domains** and add a domain you own.
-4. Add the exact SPF/DKIM DNS records Resend displays at your domain's DNS provider.
-5. Wait until the domain is verified in Resend.
-6. Use a sender address on that verified domain, for example \`orders@yourdomain.com\`.
+Failed, pending, abandoned and cancelled payments do not generate paid-order emails.
 
-Resend's Node SDK uses \`resend.emails.send(...)\`. VAGE supplies a stable idempotency key for each order email to protect retries from sending duplicate messages. See:
-- https://resend.com/nodejs
-- https://resend.com/docs/dashboard/emails/idempotency-keys
-- https://resend.com/docs/dashboard/domains/introduction
+## 1. Create the VAGE Gmail account
 
-Resend's examples use \`onboarding@resend.dev\` and \`delivered@resend.dev\` as sample sender/recipient values. For VAGE customer emails, verify a domain you control and use a sender on that domain.
+1. Open https://accounts.google.com/signup
+2. Create a dedicated VAGE mailbox such as vageclothing@gmail.com, if it is available.
+3. Use a strong, unique account password.
+4. Enable 2-Step Verification.
+5. Keep account recovery information up to date.
 
-## 2. Configure local environment
+Do not use your normal Gmail password in the application.
 
-Add the following to the existing \`.env.local\`; do not overwrite other database, JWT, payment or cron variables:
+## 2. Generate a Google App Password
 
-\`\`\`env
-RESEND_API_KEY=re_your_real_api_key
-EMAIL_FROM=VAGE Clothing <orders@your-verified-domain.com>
-EMAIL_REPLY_TO=support@your-verified-domain.com
-\`\`\`
+Gmail SMTP requires an App Password for this Nodemailer setup. Google requires 2-Step Verification before the App Password option appears. App Passwords are not offered for every account (for example, some Advanced Protection or managed accounts).
 
-Replace the example addresses with an address on the domain you verified. Never paste the API key into chat, browser code, GitHub or \`.env.example\`.
+1. Sign in to the VAGE Gmail account.
+2. Open https://myaccount.google.com/apppasswords
+3. Generate an App Password for the VAGE application.
+4. Copy the 16-character password and store it safely.
 
-Restart the Next.js development server after saving \`.env.local\`.
+Google describes App Passwords as a fallback for apps that cannot use Sign in with Google and recommends OAuth when available. Never share the App Password or commit it to GitHub.
 
-## 3. Trigger the first VAGE email
+Official Google guidance: https://support.google.com/mail/answer/185833
 
-1. Sign in to VAGE.
-2. Add a product variant to the cart.
-3. Complete checkout in local DEMO mode.
-4. Choose UPI, Card, Net Banking or Wallet.
-5. Enter the displayed local demo OTP and select **Successful payment**.
-6. VAGE confirms the order in MySQL and queues the order confirmation and payment receipt.
-7. Open the order-success page and check the **Order emails** section.
+## 3. Configure local environment
 
-The DEMO OTP is a local simulation code; it is not sent by email or SMS. No real payment is collected in DEMO mode.
+Append these settings to the existing .env.local. Keep all existing database, JWT, payment and cron settings unchanged.
 
-## 4. Diagnose failed delivery
+~~~~env
+GMAIL_USER=vageclothing@gmail.com
+GMAIL_APP_PASSWORD=the_16_character_google_app_password
+VAGE_CONTACT_TO=vageclothing@gmail.com
+~~~~
 
-Run this in MySQL Workbench:
+Replace the sample address with the exact Gmail address you created. VAGE_CONTACT_TO can be another mailbox later; it defaults to GMAIL_USER.
 
-\`\`\`sql
+The app uses Gmail SMTP through Nodemailer. The account's normal password is never used. These variables are server-side only and must never use NEXT_PUBLIC_ prefixes.
+
+## 4. Order confirmation and payment receipt
+
+When the order is marked PAID after server-side payment verification:
+
+1. VAGE creates two email-outbox records within the same database transaction that confirms the payment.
+2. The outbox worker sends an order confirmation and a payment receipt to the customer's account email.
+3. The sender is the dedicated VAGE Gmail account.
+4. Customer replies go to VAGE_CONTACT_TO.
+5. Delivery status and provider errors are stored in MySQL and displayed on the order-success page.
+
+An email failure never changes a paid order back to unpaid. The outbox has a bounded retry policy and supports manual retry from the customer's paid order page.
+
+## 5. Contact Us messages
+
+The Contact page saves each valid submission to the contact_messages MySQL table.
+
+It then sends:
+- A notification email to VAGE_CONTACT_TO, with Reply-To set to the customer's email so the VAGE team can reply directly.
+- An acknowledgement email to the customer, confirming the message reached VAGE.
+
+If Gmail is temporarily unavailable, the message remains saved in MySQL. Notification and acknowledgement delivery statuses are tracked separately and the scheduled email worker retries them.
+
+The form includes server-side validation, a honeypot field and a per-email hourly submission limit.
+
+## 6. Gmail sending limits
+
+Personal Gmail accounts have daily sending and recipient limits. Google documents a standard limit of 500 messages/recipients per day for many consumer account scenarios; the precise limits depend on account type and usage. This mailbox is intended for the low-volume VAGE college demonstration, not bulk production marketing or high-volume transactional traffic.
+
+Google limits guidance: https://support.google.com/mail/answer/22839
+
+For a production store with larger order volume, use a dedicated transactional mail service and a verified domain.
+
+## 7. Troubleshooting
+
+If an order email fails, use the order-success page's Order emails section and Retry order emails action.
+
+For Contact Us notifications, inspect the contact_messages statuses and error fields in MySQL:
+
+~~~~sql
 USE vage_clothing;
 
 SELECT
-  email_outbox_id,
-  event_type,
-  recipient_email,
-  status,
-  attempts,
-  last_error,
-  provider_message_id,
-  sent_at,
-  updated_at
-FROM email_outbox
-ORDER BY email_outbox_id DESC
+  contact_message_id,
+  full_name,
+  email,
+  subject,
+  notification_status,
+  notification_attempts,
+  notification_last_error,
+  acknowledgement_status,
+  acknowledgement_attempts,
+  acknowledgement_last_error,
+  created_at
+FROM contact_messages
+ORDER BY contact_message_id DESC
 LIMIT 20;
-\`\`\`
+~~~~
 
-Use \`last_error\` to find the exact provider rejection, such as a missing API key, invalid API key, unverified sender or rejected recipient. Fix the Resend configuration, restart the app, then click **Retry order emails** on the paid order's confirmation page.
+After correcting Gmail configuration, the scheduled endpoint /api/cron/dispatch-email-outbox can retry order and contact emails. It requires the Authorization: Bearer CRON_SECRET header.
 
-Resend idempotency keys are also used on sends. A repeated request with the same key and same payload is designed to prevent duplicate sending.
-
-## 5. Background outbox worker
-
-For a deployed environment, schedule a POST request to:
-
-\`/api/cron/dispatch-email-outbox\`
-
-with the header:
-
-\`Authorization: Bearer <CRON_SECRET>\`
-
-A one-minute schedule is appropriate for this small transactional outbox. Keep \`CRON_SECRET\` private. The worker automatically retries failed messages with a delay, up to five automatic attempts; a customer can also manually retry emails for a paid order.
-
-## Behaviour summary
-
-- **Payment success:** order and receipt emails are queued and sent.
-- **Payment failure/user dropped:** stock and coupon reservation are restored; no order email is sent.
-- **Payment pending:** stock remains reserved; no order email is sent.
-- **Email failure:** the paid order remains paid; the outbox records the error for retry.
+Restart the Next.js development server after changing .env.local.
