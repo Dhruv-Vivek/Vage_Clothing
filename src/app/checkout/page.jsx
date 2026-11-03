@@ -143,7 +143,7 @@ function Checkout() {
         console.error('Unable to load saved checkout addresses:', error);
       });
     return () => { cancelled = true; };
-  }, [user?.id]);
+  }, [user]);
 
   const selectSavedAddress = (value) => {
     setSelectedSavedAddressId(value);
@@ -167,8 +167,6 @@ function Checkout() {
       router.replace('/cart');
     }
   }, [isCartLoaded, cartItems.length, router]);
-
-  if (!isCartLoaded || isLoading || cartItems.length === 0) return null;
 
   useEffect(() => {
     if (!isCartLoaded || isLoading || !isLoggedIn || !cartItems.length ||
@@ -207,6 +205,8 @@ function Checkout() {
     return () => controller.abort();
   }, [isCartLoaded, isLoading, isLoggedIn, cartItems, selectedDelivery, couponCode]);
   
+  if (!isCartLoaded || isLoading || cartItems.length === 0) return null;
+
   const hasMissingVariant = cartItems.some((item) => !Number.isSafeInteger(Number(item.variantId)));
   const delivery = deliveryOptions.find((option) => option.id === selectedDelivery) || deliveryOptions[0];
   const estimatedTotal = cartTotal + Number(delivery.price || 0);
