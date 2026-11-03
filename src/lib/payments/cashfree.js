@@ -138,7 +138,7 @@ export function verifyCashfreeWebhookSignature(rawBody, signature, timestamp) {
     typeof rawBody !== 'string' ||
     typeof signature !== 'string' ||
     typeof timestamp !== 'string' ||
-    !/^[A-Za-z0-9+/]+={0,2}$/.test(signature) ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(signature) ||
     !signature ||
     !timestamp ||
     !/^\d{10,20}$/.test(timestamp)
@@ -158,7 +158,9 @@ export function verifyCashfreeWebhookSignature(rawBody, signature, timestamp) {
     return false;
   }
 
-  return supplied.length === expected.length && timingSafeEqual(expected, supplied);
+  return supplied.length === expected.length &&
+    supplied.toString('base64') === signature &&
+    timingSafeEqual(expected, supplied);
 }
 
 export function getCashfreeEnvironment() {
