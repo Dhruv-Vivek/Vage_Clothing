@@ -82,13 +82,17 @@ export function CartProvider({ children }) {
       const localIds = [...new Set(guestFavorites.map((item) => Number(item.productId || item.id))
         .filter((id) => Number.isSafeInteger(id) && id > 0))];
       if (localIds.length) {
-        await fetch('/api/account/wishlist', {
+        const mergeResponse = await fetch('/api/account/wishlist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
           cache: 'no-store',
           body: JSON.stringify({ productIds: localIds }),
         });
+        const mergeBody = await mergeResponse.json().catch(() => ({}));
+        if (!mergeResponse.ok) {
+          throw new Error(mergeBody.error || 'Unable to merge guest wishlist.');
+        }
       }
       const response = await fetch('/api/account/wishlist', {
         credentials: 'same-origin',
