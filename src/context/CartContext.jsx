@@ -65,15 +65,21 @@ export function CartProvider({ children }) {
   useEffect(() => {
     if (!isCartLoaded || authLoading) return;
     if (!user) {
-      wishlistSyncUserRef.current = null;
+      if (wishlistSyncUserRef.current !== null) {
+        wishlistSyncUserRef.current = null;
+        setFavorites([]);
+      }
       return;
     }
     if (wishlistSyncUserRef.current === user.id) return;
+    const previousUserId = wishlistSyncUserRef.current;
+    const guestFavorites = previousUserId === null ? favorites : [];
+    if (previousUserId !== null && previousUserId !== user.id) setFavorites([]);
     wishlistSyncUserRef.current = user.id;
     let cancelled = false;
 
     async function syncWishlist() {
-      const localIds = [...new Set(favorites.map((item) => Number(item.productId || item.id))
+      const localIds = [...new Set(guestFavorites.map((item) => Number(item.productId || item.id))
         .filter((id) => Number.isSafeInteger(id) && id > 0))];
       if (localIds.length) {
         await fetch('/api/account/wishlist', {
