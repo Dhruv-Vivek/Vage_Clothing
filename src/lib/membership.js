@@ -25,26 +25,31 @@ function mapPlan(row) {
   return {
     planId: Number(row.plan_id),
     code: String(row.plan_code).toLowerCase(),
-    name: row.display_name || row.plan_code,
-    price: Number(row.price_amount),
+    name: row.display_name || row.plan_name || row.plan_code,
+    price: Number(row.price_amount ?? row.annual_price),
     durationDays: Number(row.duration_days || 365),
     discountPercent: Number(row.discount_percent),
     freeShippingMinimum: Number(row.free_shipping_minimum || 0),
     freeShippingMethods: parseJsonArray(row.free_shipping_methods),
+    features: parseJsonArray(row.features),
   };
 }
 
+const PLAN_SELECT =
+  "SELECT plan_id, plan_code, plan_name, annual_price, display_name, price_amount, duration_days, " +
+  "discount_percent, free_shipping_minimum, free_shipping_methods, features " +
+  "FROM membership_plans ";
+
 export async function getMembershipPlans() {
   const [rows] = await getPool().execute(
-    "SELECT plan_id, plan_code, display_name, price_amount, duration_days, discount_percent, free_shipping_minimum, free_shipping_methods " +
-    "FROM membership_plans WHERE is_active = 1 AND price_amount > 0 ORDER BY discount_percent, plan_id"
+    PLAN_SELECT + "WHERE is_active = 1 AND COALESCE(price_amount, annual_price) > 0 ORDER BY discount_percent, plan_id"
   );
   return rows.map(mapPlan);
 }
 
 export async function getActiveMembershipForUser(userId) {
   const [rows] = await getPool().execute(
-    "SELECT mp.plan_code, mp.display_name, mp.discount_percent, um.starts_at, um.expires_at " +
+    "SELECT mp.plan_code, COALESCE(mp.display_name, mp.plan_name) AS display_name, mp.discount_percent, um.starts_at, um.expires_at " +
     "FROM user_memberships um INNER JOIN membership_plans mp ON mp.plan_id = um.plan_id " +
     "WHERE um.user_id = ? AND um.status = 'ACTIVE' AND um.starts_at <= NOW() AND um.expires_at > NOW() AND mp.is_active = 1 " +
     "ORDER BY um.expires_at DESC LIMIT 1",
@@ -64,36 +69,44 @@ export async function getMembershipSnapshot(userId) {
   const pool = getPool();
   await pool.execute(
     "UPDATE user_memberships SET status = 'EXPIRED' " +
-    "WHERE user_id = ? AND status = 'ACTIVE' AND expires_at <= NOW()",
+    "WHERE user_id = ? AND status = 'ACTIVE' AND expires_at IS NOT NULL AND expires_at <= NOW()",
     [userId]
   );
 
-  const [currentRows] = await pool.execute(
-    "SELECT um.membership_id, um.purchase_id, um.status, um.starts_at, um.expires_at, " +
-    "DATEDIFF(um.expires_at, NOW()) AS days_left, mp.plan_id, mp.plan_code, mp.display_name, " +
-    "mp.discount_percent, mp.free_shipping_minimum, mp.free_shipping_methods " +
+  const baseSelect =
+    "SELECT um.membership_id, um.status, um.starts_at, um.expires_at, um.cancelled_at, " +
+    "mp.plan_id, mp.plan_code, COALESCE(mp.display_name, mp.plan_name) AS display_name, " +
+    "mp.discount_percent, mp.free_shipping_minimum, mp.free_shipping_methods, " +
+    "mpt.membership_payment_id, mpt.amount, mpt.purchase_type, mpt.status AS payment_status " +
     "FROM user_memberships um INNER JOIN membership_plans mp ON mp.plan_id = um.plan_id " +
+    "LEFT JOIN membership_payment_transactions mpt ON mpt.membership_id = um.membership_id ";
+
+  const [currentRows] = await pool.execute(
+    baseSelect +
     "WHERE um.user_id = ? AND um.status = 'ACTIVE' AND um.starts_at <= NOW() AND um.expires_at > NOW() " +
     "ORDER BY um.expires_at DESC LIMIT 1",
     [userId]
   );
   const [queuedRows] = await pool.execute(
-    "SELECT um.membership_id, um.purchase_id, um.starts_at, um.expires_at, mp.plan_code, mp.display_name " +
+    "SELECT um.membership_id, um.starts_at, um.expires_at, mp.plan_code, " +
+    "COALESCE(mp.display_name, mp.plan_name) AS display_name, mpt.membership_payment_id " +
     "FROM user_memberships um INNER JOIN membership_plans mp ON mp.plan_id = um.plan_id " +
+    "LEFT JOIN membership_payment_transactions mpt ON mpt.membership_id = um.membership_id " +
     "WHERE um.user_id = ? AND um.status = 'ACTIVE' AND um.starts_at > NOW() ORDER BY um.starts_at LIMIT 1",
     [userId]
   );
   const [historyRows] = await pool.execute(
-    "SELECT um.membership_id, um.status, um.starts_at, um.expires_at, um.cancelled_at, " +
-    "mp.plan_code, mp.display_name, mp.discount_percent, mpur.amount, mpur.purchase_type " +
-    "FROM user_memberships um INNER JOIN membership_plans mp ON mp.plan_id = um.plan_id " +
-    "LEFT JOIN membership_purchases mpur ON mpur.purchase_id = um.purchase_id " +
-    "WHERE um.user_id = ? ORDER BY um.starts_at DESC LIMIT 25",
+    baseSelect +
+    "WHERE um.user_id = ? ORDER BY um.created_at DESC LIMIT 25",
     [userId]
   );
-  const [purchaseRows] = await pool.execute(
-    "SELECT purchase_id, purchase_type, amount, currency, status, created_at, paid_at " +
-    "FROM membership_purchases WHERE user_id = ? ORDER BY created_at DESC LIMIT 10",
+  const [paymentRows] = await pool.execute(
+    "SELECT mpt.membership_payment_id, mpt.purchase_type, mpt.amount, mpt.currency, mpt.status, " +
+    "mpt.created_at, mpt.paid_at, mp.plan_code, COALESCE(mp.display_name, mp.plan_name) AS display_name " +
+    "FROM membership_payment_transactions mpt " +
+    "INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
+    "INNER JOIN membership_plans mp ON mp.plan_id = um.plan_id " +
+    "WHERE um.user_id = ? ORDER BY mpt.created_at DESC LIMIT 10",
     [userId]
   );
 
@@ -102,19 +115,19 @@ export async function getMembershipSnapshot(userId) {
   return {
     current: current ? {
       membershipId: Number(current.membership_id),
-      purchaseId: current.purchase_id === null ? null : Number(current.purchase_id),
+      paymentId: current.membership_payment_id === null ? null : Number(current.membership_payment_id),
       code: String(current.plan_code).toLowerCase(),
       name: current.display_name || current.plan_code,
       discountPercent: Number(current.discount_percent),
       startsAt: current.starts_at,
       expiresAt: current.expires_at,
-      daysLeft: Number(current.days_left),
+      daysLeft: current.expires_at ? Math.max(0, Math.ceil((new Date(current.expires_at).getTime() - Date.now()) / 86400000)) : 0,
       freeShippingMinimum: Number(current.free_shipping_minimum || 0),
       freeShippingMethods: parseJsonArray(current.free_shipping_methods),
     } : null,
     queued: queued ? {
       membershipId: Number(queued.membership_id),
-      purchaseId: queued.purchase_id === null ? null : Number(queued.purchase_id),
+      paymentId: queued.membership_payment_id === null ? null : Number(queued.membership_payment_id),
       code: String(queued.plan_code).toLowerCase(),
       name: queued.display_name || queued.plan_code,
       startsAt: queued.starts_at,
@@ -130,9 +143,11 @@ export async function getMembershipSnapshot(userId) {
       cancelledAt: row.cancelled_at,
       amount: row.amount === null ? null : Number(row.amount),
       purchaseType: row.purchase_type || null,
+      paymentStatus: row.payment_status || null,
     })),
-    purchases: purchaseRows.map((row) => ({
-      purchaseId: Number(row.purchase_id),
+    payments: paymentRows.map((row) => ({
+      paymentId: Number(row.membership_payment_id),
+      plan: row.display_name || row.plan_code,
       purchaseType: row.purchase_type,
       amount: Number(row.amount),
       currency: row.currency,
@@ -143,11 +158,14 @@ export async function getMembershipSnapshot(userId) {
   };
 }
 
-export async function findMembershipPurchaseForUser(userId, purchaseId) {
+export async function getMembershipPurchaseOwner(userId, paymentId) {
   const [rows] = await getPool().execute(
-    "SELECT purchase_id, plan_id, gateway_order_id, gateway_payment_id, amount, currency, status " +
-    "FROM membership_purchases WHERE purchase_id = ? AND user_id = ? AND gateway = 'RAZORPAY' LIMIT 1",
-    [purchaseId, userId]
+    "SELECT mpt.membership_payment_id, mpt.membership_id, mpt.gateway_order_id, " +
+    "mpt.gateway_payment_id, mpt.amount, mpt.currency, mpt.status, um.plan_id " +
+    "FROM membership_payment_transactions mpt " +
+    "INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
+    "WHERE mpt.membership_payment_id = ? AND um.user_id = ? AND mpt.gateway = 'RAZORPAY' LIMIT 1",
+    [paymentId, userId]
   );
   return rows[0] || null;
 }
@@ -161,45 +179,51 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
 
   const pool = getPool();
   const connection = await pool.getConnection();
-  let purchaseId;
+  let paymentId;
+  let membershipId;
   let plan;
   let purchaseType = 'NEW';
+  const pendingOrderId = 'pending_' + randomUUID().replaceAll('-', '');
 
   try {
     await connection.beginTransaction();
-    await connection.execute("SELECT user_id FROM users WHERE user_id = ? AND is_active = 1 FOR UPDATE", [user.id]);
+    const [users] = await connection.execute(
+      "SELECT user_id FROM users WHERE user_id = ? AND is_active = 1 FOR UPDATE",
+      [user.id]
+    );
+    if (!users.length) throw new Error('Your account is unavailable. Please sign in again.');
 
     const [existingRows] = await connection.execute(
-      "SELECT purchase_id, plan_id, gateway_order_id, amount, status " +
-      "FROM membership_purchases WHERE user_id = ? AND idempotency_key = ? LIMIT 1 FOR UPDATE",
+      "SELECT mpt.membership_payment_id, mpt.membership_id, mpt.gateway_order_id, mpt.amount, mpt.status, " +
+      "mp.plan_id, mp.plan_code, mp.plan_name, mp.annual_price, mp.display_name, mp.price_amount, mp.duration_days, " +
+      "mp.discount_percent, mp.free_shipping_minimum, mp.free_shipping_methods, mp.features " +
+      "FROM membership_payment_transactions mpt " +
+      "INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
+      "INNER JOIN membership_plans mp ON mp.plan_id = um.plan_id " +
+      "WHERE um.user_id = ? AND mpt.idempotency_key = ? LIMIT 1 FOR UPDATE",
       [user.id, idempotencyKey]
     );
     if (existingRows.length) {
       const existing = existingRows[0];
       if (existing.status === 'FAILED') throw new Error('This purchase attempt failed. Start a new purchase.');
-      if (!existing.gateway_order_id) throw new Error('This purchase is still being prepared. Please retry in a moment.');
-      const [planRows] = await connection.execute(
-        "SELECT plan_id, plan_code, display_name, price_amount, duration_days, discount_percent, free_shipping_minimum, free_shipping_methods " +
-        "FROM membership_plans WHERE plan_id = ? LIMIT 1",
-        [existing.plan_id]
-      );
-      plan = planRows[0];
-      purchaseId = Number(existing.purchase_id);
+      if (!existing.gateway_order_id || existing.gateway_order_id.startsWith('pending_')) {
+        throw new Error('This purchase is still being prepared. Please retry in a moment.');
+      }
       await connection.commit();
       return {
-        purchaseId,
+        purchaseId: Number(existing.membership_payment_id),
+        membershipId: Number(existing.membership_id),
         amount: cents(existing.amount),
         currency: 'INR',
         razorpayOrderId: existing.gateway_order_id,
         keyId: getRazorpayPublicKey(),
-        plan: mapPlan(plan),
+        plan: mapPlan(existing),
         existing: true,
       };
     }
 
     const [planRows] = await connection.execute(
-      "SELECT plan_id, plan_code, display_name, price_amount, duration_days, discount_percent, free_shipping_minimum, free_shipping_methods " +
-      "FROM membership_plans WHERE LOWER(plan_code) = ? AND is_active = 1 AND price_amount > 0 LIMIT 1",
+      PLAN_SELECT + "WHERE LOWER(plan_code) = ? AND is_active = 1 AND COALESCE(price_amount, annual_price) > 0 LIMIT 1",
       [code]
     );
     if (!planRows.length) throw new Error('This membership plan is not available.');
@@ -228,18 +252,27 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
     if (queuedRows.length) throw new Error('You already have a future membership renewal queued.');
 
     const [pendingRows] = await connection.execute(
-      "SELECT purchase_id FROM membership_purchases WHERE user_id = ? AND status IN ('CREATED','AUTHORIZED') " +
-      "AND created_at > DATE_SUB(NOW(), INTERVAL 30 MINUTE) LIMIT 1 FOR UPDATE",
+      "SELECT mpt.membership_payment_id FROM membership_payment_transactions mpt " +
+      "INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
+      "WHERE um.user_id = ? AND mpt.status IN ('CREATED','AUTHORIZED') " +
+      "AND mpt.created_at > DATE_SUB(NOW(), INTERVAL 30 MINUTE) LIMIT 1 FOR UPDATE",
       [user.id]
     );
     if (pendingRows.length) throw new Error('You already have a membership payment in progress. Complete or close that checkout first.');
 
-    const [insert] = await connection.execute(
-      "INSERT INTO membership_purchases (user_id, plan_id, purchase_type, idempotency_key, amount, currency, status) " +
-      "VALUES (?, ?, ?, ?, ?, 'INR', 'CREATED')",
-      [user.id, plan.plan_id, purchaseType, idempotencyKey, Number(plan.price_amount)]
+    const [membershipInsert] = await connection.execute(
+      "INSERT INTO user_memberships (user_id, plan_id, status, starts_at, expires_at) VALUES (?, ?, 'PENDING', NULL, NULL)",
+      [user.id, plan.plan_id]
     );
-    purchaseId = Number(insert.insertId);
+    membershipId = Number(membershipInsert.insertId);
+
+    const [paymentInsert] = await connection.execute(
+      "INSERT INTO membership_payment_transactions " +
+      "(membership_id, gateway, gateway_order_id, amount, currency, status, purchase_type, idempotency_key) " +
+      "VALUES (?, 'RAZORPAY', ?, ?, 'INR', 'CREATED', ?, ?)",
+      [membershipId, pendingOrderId, Number(plan.price_amount ?? plan.annual_price), purchaseType, idempotencyKey]
+    );
+    paymentId = Number(paymentInsert.insertId);
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -249,23 +282,27 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
   }
 
   try {
+    const price = Number(plan.price_amount ?? plan.annual_price);
     const gatewayOrder = await getRazorpay().orders.create({
-      amount: cents(plan.price_amount),
+      amount: cents(price),
       currency: 'INR',
-      receipt: 'VG-MEM-' + purchaseId,
+      receipt: 'VG-MEM-' + paymentId,
       notes: {
-        vage_membership_purchase_id: String(purchaseId),
+        vage_membership_payment_id: String(paymentId),
+        vage_membership_id: String(membershipId),
         vage_user_id: String(user.id),
         vage_plan_code: String(plan.plan_code),
       },
     });
     await pool.execute(
-      "UPDATE membership_purchases SET gateway_order_id = ? WHERE purchase_id = ? AND status = 'CREATED'",
-      [gatewayOrder.id, purchaseId]
+      "UPDATE membership_payment_transactions SET gateway_order_id = ? " +
+      "WHERE membership_payment_id = ? AND gateway_order_id = ? AND status = 'CREATED'",
+      [gatewayOrder.id, paymentId, pendingOrderId]
     );
     return {
-      purchaseId,
-      amount: cents(plan.price_amount),
+      purchaseId: paymentId,
+      membershipId,
+      amount: cents(price),
       currency: 'INR',
       razorpayOrderId: gatewayOrder.id,
       keyId: getRazorpayPublicKey(),
@@ -274,29 +311,52 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
     };
   } catch (error) {
     await pool.execute(
-      "UPDATE membership_purchases SET status = 'FAILED' WHERE purchase_id = ? AND status = 'CREATED'",
-      [purchaseId]
+      "UPDATE membership_payment_transactions SET status = 'FAILED' WHERE membership_payment_id = ? AND status = 'CREATED'",
+      [paymentId]
+    ).catch(() => undefined);
+    await pool.execute(
+      "UPDATE user_memberships SET status = 'FAILED' WHERE membership_id = ? AND status = 'PENDING'",
+      [membershipId]
     ).catch(() => undefined);
     throw new Error('Unable to start membership payment. No membership was activated. Please try again.');
   }
 }
 
 export async function markMembershipPurchaseAuthorized({ purchaseId, gatewayPaymentId }) {
-  const pool = getPool();
-  const [result] = await pool.execute(
-    "UPDATE membership_purchases SET gateway_payment_id = COALESCE(gateway_payment_id, ?), status = 'AUTHORIZED' " +
-    "WHERE purchase_id = ? AND status IN ('CREATED','AUTHORIZED')",
+  const [result] = await getPool().execute(
+    "UPDATE membership_payment_transactions SET gateway_payment_id = COALESCE(gateway_payment_id, ?), status = 'AUTHORIZED' " +
+    "WHERE membership_payment_id = ? AND status IN ('CREATED','AUTHORIZED')",
     [gatewayPaymentId || null, purchaseId]
   );
   return { updated: result.affectedRows > 0, status: 'AUTHORIZED' };
 }
 
 export async function markMembershipPurchaseFailed(purchaseId) {
-  const [result] = await getPool().execute(
-    "UPDATE membership_purchases SET status = 'FAILED' WHERE purchase_id = ? AND status IN ('CREATED','AUTHORIZED')",
-    [purchaseId]
-  );
-  return { updated: result.affectedRows > 0, status: 'FAILED' };
+  const pool = getPool();
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [rows] = await connection.execute(
+      "SELECT membership_id FROM membership_payment_transactions WHERE membership_payment_id = ? FOR UPDATE",
+      [purchaseId]
+    );
+    if (!rows.length) throw new Error('Membership payment was not found.');
+    await connection.execute(
+      "UPDATE membership_payment_transactions SET status = 'FAILED' WHERE membership_payment_id = ? AND status IN ('CREATED','AUTHORIZED')",
+      [purchaseId]
+    );
+    await connection.execute(
+      "UPDATE user_memberships SET status = 'FAILED' WHERE membership_id = ? AND status = 'PENDING'",
+      [rows[0].membership_id]
+    );
+    await connection.commit();
+    return { status: 'FAILED' };
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 export async function markMembershipPurchaseCaptured({
@@ -312,63 +372,63 @@ export async function markMembershipPurchaseCaptured({
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      "SELECT purchase_id, user_id, plan_id, purchase_type, gateway_order_id, gateway_payment_id, amount, currency, status " +
-      "FROM membership_purchases WHERE purchase_id = ? AND gateway = 'RAZORPAY' LIMIT 1 FOR UPDATE",
+      "SELECT mpt.membership_payment_id, mpt.membership_id, mpt.gateway_order_id, mpt.gateway_payment_id, " +
+      "mpt.amount, mpt.currency, mpt.status, um.user_id, um.plan_id " +
+      "FROM membership_payment_transactions mpt INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
+      "WHERE mpt.membership_payment_id = ? AND mpt.gateway = 'RAZORPAY' LIMIT 1 FOR UPDATE",
       [purchaseId]
     );
-    if (!rows.length) throw new Error('Membership purchase was not found.');
-    const purchase = rows[0];
+    if (!rows.length) throw new Error('Membership payment was not found.');
+    const payment = rows[0];
 
-    if (purchase.status === 'CAPTURED') {
+    if (payment.status === 'CAPTURED') {
       await connection.commit();
       return { purchaseId, status: 'CAPTURED', alreadyFinal: true };
     }
-    if (purchase.status === 'FAILED') throw new Error('This membership purchase has already failed.');
-    if (purchase.gateway_order_id !== gatewayOrderId) throw new Error('Payment order does not match this membership purchase.');
-    if (purchase.gateway_payment_id && String(purchase.gateway_payment_id) !== String(gatewayPaymentId)) {
+    if (payment.gateway_order_id !== gatewayOrderId) throw new Error('Payment order does not match this membership purchase.');
+    if (payment.gateway_payment_id && String(payment.gateway_payment_id) !== String(gatewayPaymentId)) {
       throw new Error('A different payment is already linked to this membership purchase.');
     }
-    if (Number(amount) !== cents(purchase.amount) || String(currency).toUpperCase() !== 'INR') {
+    if (Number(amount) !== cents(payment.amount) || String(currency).toUpperCase() !== 'INR') {
       throw new Error('Captured membership payment amount or currency does not match the selected plan.');
     }
 
-    await connection.execute("SELECT user_id FROM users WHERE user_id = ? FOR UPDATE", [purchase.user_id]);
+    await connection.execute("SELECT user_id FROM users WHERE user_id = ? FOR UPDATE", [payment.user_id]);
 
     const [activeRows] = await connection.execute(
-      "SELECT membership_id, plan_id, expires_at FROM user_memberships " +
+      "SELECT plan_id, expires_at FROM user_memberships " +
       "WHERE user_id = ? AND status = 'ACTIVE' AND starts_at <= NOW() AND expires_at > NOW() " +
       "ORDER BY expires_at DESC LIMIT 1 FOR UPDATE",
-      [purchase.user_id]
+      [payment.user_id]
     );
-
     let startsAt = null;
     if (activeRows.length) {
-      if (Number(activeRows[0].plan_id) !== Number(purchase.plan_id)) {
-        throw new Error('The active membership changed before payment capture. Contact VAGE support before purchasing again.');
+      if (Number(activeRows[0].plan_id) !== Number(payment.plan_id)) {
+        throw new Error('The active membership changed before payment capture. Contact VAGE support.');
       }
       startsAt = activeRows[0].expires_at;
     }
 
     const [planRows] = await connection.execute(
       "SELECT duration_days FROM membership_plans WHERE plan_id = ? AND is_active = 1 LIMIT 1",
-      [purchase.plan_id]
+      [payment.plan_id]
     );
     if (!planRows.length) throw new Error('The purchased membership plan is no longer active.');
 
     await connection.execute(
-      "INSERT INTO user_memberships (user_id, plan_id, purchase_id, status, starts_at, expires_at) " +
-      "VALUES (?, ?, ?, 'ACTIVE', COALESCE(?, NOW()), DATE_ADD(COALESCE(?, NOW()), INTERVAL ? DAY))",
-      [purchase.user_id, purchase.plan_id, purchase.purchase_id, startsAt, startsAt, Number(planRows[0].duration_days)]
+      "UPDATE user_memberships SET status = 'ACTIVE', starts_at = COALESCE(?, NOW()), " +
+      "expires_at = DATE_ADD(COALESCE(?, NOW()), INTERVAL ? DAY), activated_at = NOW() " +
+      "WHERE membership_id = ? AND status IN ('PENDING','FAILED')",
+      [startsAt, startsAt, Number(planRows[0].duration_days || 365), payment.membership_id]
     );
-
     await connection.execute(
-      "UPDATE membership_purchases SET gateway_payment_id = ?, status = 'CAPTURED', signature_verified = ?, paid_at = NOW() " +
-      "WHERE purchase_id = ?",
+      "UPDATE membership_payment_transactions SET gateway_payment_id = ?, status = 'CAPTURED', " +
+      "signature_verified = ?, paid_at = NOW() WHERE membership_payment_id = ?",
       [gatewayPaymentId, signatureVerified ? 1 : 0, purchaseId]
     );
 
     await connection.commit();
-    return { purchaseId, status: 'CAPTURED', activated: true };
+    return { purchaseId, membershipId: Number(payment.membership_id), status: 'CAPTURED', activated: true };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -384,16 +444,7 @@ export async function cancelQueuedMembership(userId, membershipId) {
     [membershipId, userId]
   );
   if (result.affectedRows !== 1) {
-    throw new Error('Only a future queued renewal can be cancelled. Current memberships remain active until their expiry; auto-renewal is not enabled.');
+    throw new Error('Only a future queued renewal can be cancelled. Current memberships remain active until expiry; auto-renewal is not enabled.');
   }
   return { cancelled: true };
-}
-
-export async function getMembershipPurchaseOwner(userId, purchaseId) {
-  const [rows] = await getPool().execute(
-    "SELECT purchase_id, user_id, gateway_order_id, gateway_payment_id, amount, currency, status " +
-    "FROM membership_purchases WHERE purchase_id = ? AND user_id = ? AND gateway = 'RAZORPAY' LIMIT 1",
-    [purchaseId, userId]
-  );
-  return rows[0] || null;
 }
