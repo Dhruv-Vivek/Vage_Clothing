@@ -61,22 +61,24 @@ export function CartProvider({ children }) {
     localStorage.setItem('favorites', JSON.stringify(favorites));
   }, [favorites, isCartLoaded, isLoggedIn]);
  
+  const currentUserId = user?.id ?? null;
+
   // Authenticated customers use the MySQL wishlist as the source of truth.
   // Guest favorites are merged into the account once at sign-in.
   useEffect(() => {
     if (!isCartLoaded || authLoading) return;
-    if (!user) {
+    if (currentUserId === null) {
       if (wishlistSyncUserRef.current !== null) {
         wishlistSyncUserRef.current = null;
         setFavorites([]);
       }
       return;
     }
-    if (wishlistSyncUserRef.current === user.id) return;
+    if (wishlistSyncUserRef.current === currentUserId) return;
     const previousUserId = wishlistSyncUserRef.current;
     const guestFavorites = previousUserId === null ? favorites : [];
-    if (previousUserId !== null && previousUserId !== user.id) setFavorites([]);
-    wishlistSyncUserRef.current = user.id;
+    if (previousUserId !== null && previousUserId !== currentUserId) setFavorites([]);
+    wishlistSyncUserRef.current = currentUserId;
     let cancelled = false;
 
     async function syncWishlist() {
@@ -112,7 +114,7 @@ export function CartProvider({ children }) {
       wishlistSyncUserRef.current = null;
     });
     return () => { cancelled = true; };
-  }, [isCartLoaded, authLoading, user?.id, favorites]);
+  }, [isCartLoaded, authLoading, currentUserId, favorites]);
 
   // A cart line is one exact product variant (product + size + colour).
   const addToCart = (product, variant, quantity = 1) => {
