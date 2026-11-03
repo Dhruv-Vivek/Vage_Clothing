@@ -17,6 +17,7 @@
     "lucide-react": "^0.552.0",
     "mysql2": "^3.24.6",
     "next": "^15.5.0",
+    "nodemailer": "^10.3.1",
     "razorpay": "^2.9.8",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
