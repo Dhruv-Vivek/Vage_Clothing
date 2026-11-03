@@ -62,8 +62,8 @@ SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schem
   'SELECT ''membership_plans.updated_at already exists'' AS migration_note');
 PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
 
--- A separate purchase record prevents membership payments from being confused
--- with product orders/payments. Razorpay webhooks can identify either entity.
+-- A PENDING membership row is created before checkout; this payment ledger
+-- links it to Razorpay and is the source of truth for purchase/capture state.
 CREATE TABLE IF NOT EXISTS user_memberships (
   membership_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id BIGINT UNSIGNED NOT NULL,
@@ -107,24 +107,7 @@ CREATE TABLE IF NOT EXISTS membership_payment_transactions (
   CONSTRAINT chk_membership_payment_amount CHECK (amount > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS user_memberships (
-  membership_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  plan_id BIGINT UNSIGNED NOT NULL,
-  status ENUM('PENDING','ACTIVE','CANCELLED','EXPIRED','FAILED') NOT NULL DEFAULT 'PENDING',
-  starts_at DATETIME DEFAULT NULL,
-  expires_at DATETIME DEFAULT NULL,
-  activated_at DATETIME DEFAULT NULL,
-  cancelled_at DATETIME DEFAULT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (membership_id),
-  KEY idx_user_memberships_current (user_id, status, expires_at),
-  KEY idx_user_memberships_plan (plan_id, status),
-  CONSTRAINT fk_user_memberships_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT fk_user_memberships_plan FOREIGN KEY (plan_id) REFERENCES membership_plans(plan_id) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT chk_user_membership_dates CHECK (expires_at IS NULL OR starts_at IS NULL OR expires_at > starts_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 
 -- Existing Batch 5-6 membership tables are retained. Add payment idempotency metadata.
 SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_payment_transactions' AND column_name='purchase_type')=0,
