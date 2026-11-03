@@ -35,9 +35,14 @@ function getTransporter() {
 
   const { user, appPassword } = getVageMailboxConfig();
   transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user, pass: appPassword },
-    pool: false,
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
+    auth: {
+      user,
+      pass: appPassword,
+    },
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 20000,
