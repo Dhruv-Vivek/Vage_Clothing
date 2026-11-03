@@ -11,6 +11,10 @@ import { markGatewayPaymentCaptured } from '@/lib/order-payments';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function toCents(value) {
+  return Math.round(Number(value || 0) * 100);
+}
+
 function jsonError(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
@@ -111,7 +115,7 @@ export async function POST(request) {
 
       if (
         remoteOrder.order_status === 'PAID' &&
-        Number(remoteOrder.order_amount) === Number(successful?.payment_amount) &&
+        toCents(remoteOrder.order_amount) === toCents(successful?.payment_amount) &&
         String(remoteOrder.order_currency).toUpperCase() === String(successful?.payment_currency || 'INR').toUpperCase() &&
         successful
       ) {
