@@ -160,18 +160,6 @@ export async function getMembershipSnapshot(userId) {
 
 export async function getMembershipPurchaseOwner(userId, paymentId) {
   const [rows] = await getPool().execute(
-    "SELECT mpt.membership_payment_id, mpt.membership_id, mpt.gateway_order_id, " +
-    "mpt.gateway_payment_id, mpt.amount, mpt.currency, mpt.status, um.plan_id " +
-    "FROM membership_payment_transactions mpt " +
-    "INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
-    "WHERE mpt.membership_payment_id = ? AND um.user_id = ? AND mpt.gateway = 'RAZORPAY' LIMIT 1",
-    [paymentId, userId]
-  );
-  return rows[0] || null;
-}
-
-export async function getMembershipPurchaseOwner(userId, paymentId) {
-  const [rows] = await getPool().execute(
     "SELECT mpt.membership_payment_id, mpt.membership_id, mpt.gateway_order_id, mpt.gateway_payment_id, " +
     "mpt.amount, mpt.currency, mpt.status, um.user_id " +
     "FROM membership_payment_transactions mpt INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
@@ -265,8 +253,7 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
     const [pendingRows] = await connection.execute(
       "SELECT mpt.membership_payment_id FROM membership_payment_transactions mpt " +
       "INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
-      "WHERE um.user_id = ? AND mpt.status IN ('CREATED','AUTHORIZED') " +
-      "AND mpt.created_at > DATE_SUB(NOW(), INTERVAL 30 MINUTE) LIMIT 1 FOR UPDATE",
+      "WHERE um.user_id = ? AND mpt.status IN ('CREATED','AUTHORIZED') LIMIT 1 FOR UPDATE",
       [user.id]
     );
     if (pendingRows.length) throw new Error('You already have a membership payment in progress. Complete or close that checkout first.');
