@@ -98,7 +98,7 @@ export function CartProvider({ children }) {
       wishlistSyncUserRef.current = null;
     });
     return () => { cancelled = true; };
-  }, [isCartLoaded, authLoading, user?.id]);
+  }, [isCartLoaded, authLoading, user?.id, favorites]);
 
   // A cart line is one exact product variant (product + size + colour).
   const addToCart = (product, variant, quantity = 1) => {
