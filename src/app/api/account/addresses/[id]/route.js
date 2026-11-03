@@ -49,6 +49,7 @@ export async function PATCH(request, context) {
 
   try {
     await connection.beginTransaction();
+    await connection.execute('SELECT user_id FROM users WHERE user_id = ? FOR UPDATE', [user.id]);
     const [existing] = await connection.execute(
       'SELECT saved_address_id, is_default FROM saved_addresses WHERE saved_address_id = ? AND user_id = ? FOR UPDATE',
       [addressId, user.id]
@@ -105,6 +106,7 @@ export async function DELETE(_request, context) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+    await connection.execute('SELECT user_id FROM users WHERE user_id = ? FOR UPDATE', [user.id]);
     const [existing] = await connection.execute(
       'SELECT is_default FROM saved_addresses WHERE saved_address_id = ? AND user_id = ? FOR UPDATE',
       [addressId, user.id]
