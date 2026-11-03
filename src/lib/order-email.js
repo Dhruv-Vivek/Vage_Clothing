@@ -303,7 +303,7 @@ async function dispatchOne(outboxRow) {
   }
 }
 
-/** Safe to call repeatedly: unique outbox keys + Resend idempotency prevent duplicates. */
+/** Safe to call repeatedly: unique outbox keys and atomic outbox claims reduce duplicate sends. */
 export async function dispatchPaidOrderEmails(orderId) {
   const pool = getPool();
   const numericId = Number(orderId);
