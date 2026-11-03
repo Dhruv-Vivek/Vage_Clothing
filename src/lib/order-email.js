@@ -148,7 +148,7 @@ function buildEmailContent(eventType, order, items) {
     [order.city, order.state_name, order.postal_code].filter(Boolean).join(', '),
     order.country || 'India',
     order.phone,
-  ].filter(Boolean).join('<br/>');
+  ].filter(Boolean).map(escapeHtml).join('<br/>');
 
   const plainAddress = [
     order.recipient_name || order.full_name,
