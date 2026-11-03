@@ -7,18 +7,32 @@ function toCents(value) {
   return Math.round(Number(value || 0) * 100);
 }
 
-export async function markRazorpayPaymentCaptured({
+/**
+ * Provider-neutral payment capture finalisation.
+ * The gateway status and amount must be verified by the caller before this
+ * function is invoked. All providers share the same MySQL/order/email path.
+ */
+export async function markGatewayPaymentCaptured({
+  gateway,
   gatewayOrderId,
   gatewayPaymentId,
   amount,
   currency,
-  signatureVerified,
+  signatureVerified = false,
   dispatchEmails = true,
 }) {
+  const provider = String(gateway || '').trim().toUpperCase();
+  if (!['RAZORPAY', 'CASHFREE', 'DEMO'].includes(provider)) {
+    throw new Error('Unsupported payment provider.');
+  }
+  if (!gatewayOrderId || !gatewayPaymentId) {
+    throw new Error('A gateway order and payment reference are required.');
+  }
+
   const pool = getPool();
   const connection = await pool.getConnection();
-
   let orderId;
+
   try {
     await connection.beginTransaction();
 
@@ -27,7 +41,7 @@ export async function markRazorpayPaymentCaptured({
           o.order_id, o.order_number, o.user_id, o.status AS order_status,
           o.payment_status, o.total_amount, p.payment_id, p.amount AS payment_amount,
           p.status AS payment_row_status, u.email,
-          g.gateway_order_id, g.gateway_payment_id
+          g.gateway, g.gateway_order_id, g.gateway_payment_id
        FROM order_payment_gateways g
        INNER JOIN payments p ON p.payment_id = g.payment_id
        INNER JOIN orders o ON o.order_id = p.order_id
@@ -38,16 +52,18 @@ export async function markRazorpayPaymentCaptured({
       [gatewayOrderId]
     );
 
-    if (!rows.length) throw new Error('Razorpay order is not linked to a VAGE order.');
+    if (!rows.length || rows[0].gateway !== provider) {
+      throw new Error('Payment reference is not linked to the expected VAGE provider/order.');
+    }
+
     const row = rows[0];
     orderId = Number(row.order_id);
 
-    if (row.gateway_payment_id && row.gateway_payment_id !== gatewayPaymentId) {
-      throw new Error('A different Razorpay payment is already linked to this order.');
+    if (row.gateway_payment_id && String(row.gateway_payment_id) !== String(gatewayPaymentId)) {
+      throw new Error('A different payment transaction is already associated with this order.');
     }
 
-    const expectedCents = toCents(row.payment_amount);
-    if (Number(amount) !== expectedCents || currency !== 'INR') {
+    if (Number(amount) !== toCents(row.payment_amount) || String(currency).toUpperCase() !== 'INR') {
       throw new Error('Captured payment amount or currency does not match the VAGE order.');
     }
 
@@ -59,14 +75,14 @@ export async function markRazorpayPaymentCaptured({
       await connection.execute(
         `UPDATE payments
          SET status = 'SUCCESS', transaction_ref = ?, paid_at = NOW()
-         WHERE payment_id = ?`,
-        [gatewayPaymentId, row.payment_id]
+         WHERE payment_id = ? AND status <> 'SUCCESS'`,
+        [String(gatewayPaymentId), row.payment_id]
       );
       await connection.execute(
         `UPDATE order_payment_gateways
          SET gateway_payment_id = ?, status = 'CAPTURED', signature_verified = ?
-         WHERE gateway_order_id = ?`,
-        [gatewayPaymentId, signatureVerified ? 1 : 0, gatewayOrderId]
+         WHERE gateway_order_id = ? AND gateway = ?`,
+        [String(gatewayPaymentId), signatureVerified ? 1 : 0, gatewayOrderId, provider]
       );
       await connection.execute(
         `UPDATE orders SET status = 'CONFIRMED', payment_status = 'PAID' WHERE order_id = ?`,
@@ -88,8 +104,6 @@ export async function markRazorpayPaymentCaptured({
     connection.release();
   }
 
-  // Webhooks can acknowledge after durable outbox insertion; a scheduled worker
-  // sends email separately so a slow email provider cannot delay Razorpay ACKs.
   const emailResults = dispatchEmails
     ? await dispatchPaidOrderEmails(orderId).catch((error) => [{
         status: 'FAILED',
@@ -100,8 +114,12 @@ export async function markRazorpayPaymentCaptured({
   return { orderId, paymentStatus: 'PAID', emailResults };
 }
 
+export async function markGatewayPaymentAuthorized({ gateway, gatewayOrderId, gatewayPaymentId }) {
+  const provider = String(gateway || '').trim().toUpperCase();
+  if (!['RAZORPAY', 'CASHFREE'].includes(provider)) {
+    throw new Error('Unsupported payment provider for authorization.');
+  }
 
-export async function markRazorpayPaymentAuthorized({ gatewayOrderId, gatewayPaymentId }) {
   const pool = getPool();
   const connection = await pool.getConnection();
 
@@ -109,7 +127,7 @@ export async function markRazorpayPaymentAuthorized({ gatewayOrderId, gatewayPay
     await connection.beginTransaction();
     const [rows] = await connection.execute(
       `SELECT o.order_id, o.status AS order_status, o.payment_status,
-              g.gateway_payment_id
+              g.gateway, g.gateway_payment_id
        FROM order_payment_gateways g
        INNER JOIN payments p ON p.payment_id = g.payment_id
        INNER JOIN orders o ON o.order_id = p.order_id
@@ -119,7 +137,9 @@ export async function markRazorpayPaymentAuthorized({ gatewayOrderId, gatewayPay
       [gatewayOrderId]
     );
 
-    if (!rows.length) throw new Error('Razorpay order is not linked to a VAGE order.');
+    if (!rows.length || rows[0].gateway !== provider) {
+      throw new Error('Payment reference is not linked to the expected VAGE provider/order.');
+    }
     const row = rows[0];
 
     if (row.payment_status === 'PAID') {
@@ -129,15 +149,15 @@ export async function markRazorpayPaymentAuthorized({ gatewayOrderId, gatewayPay
     if (row.order_status === 'CANCELLED' || row.order_status === 'RETURNED') {
       throw new Error('This order is no longer active.');
     }
-    if (row.gateway_payment_id && row.gateway_payment_id !== gatewayPaymentId) {
-      throw new Error('A different Razorpay payment is already associated with this order.');
+    if (row.gateway_payment_id && String(row.gateway_payment_id) !== String(gatewayPaymentId)) {
+      throw new Error('A different payment transaction is already associated with this order.');
     }
 
     await connection.execute(
       `UPDATE order_payment_gateways
        SET gateway_payment_id = ?, status = 'AUTHORIZED'
-       WHERE gateway_order_id = ? AND status <> 'CAPTURED'`,
-      [gatewayPaymentId, gatewayOrderId]
+       WHERE gateway_order_id = ? AND gateway = ? AND status <> 'CAPTURED'`,
+      [String(gatewayPaymentId), gatewayOrderId, provider]
     );
 
     await connection.commit();
@@ -150,7 +170,36 @@ export async function markRazorpayPaymentAuthorized({ gatewayOrderId, gatewayPay
   }
 }
 
-export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPaymentId }) {
+export async function markGatewayPaymentPending({ gateway, gatewayOrderId }) {
+  const provider = String(gateway || '').trim().toUpperCase();
+  if (!['CASHFREE', 'DEMO'].includes(provider)) {
+    throw new Error('Unsupported payment provider for pending status.');
+  }
+
+  const pool = getPool();
+  const [result] = await pool.execute(
+    `UPDATE order_payment_gateways g
+     INNER JOIN payments p ON p.payment_id = g.payment_id
+     INNER JOIN orders o ON o.order_id = p.order_id
+     SET g.status = 'PENDING'
+     WHERE g.gateway_order_id = ? AND g.gateway = ?
+       AND o.status = 'PENDING' AND o.payment_status = 'PENDING'
+       AND g.status NOT IN ('CAPTURED','FAILED','REFUNDED')`,
+    [gatewayOrderId, provider]
+  );
+  return { updated: result.affectedRows > 0, paymentStatus: 'PENDING' };
+}
+
+/**
+ * Final failure/abandonment path. Row locks and the order status guard ensure
+ * reserved inventory and coupon usage are released at most once.
+ */
+export async function markGatewayPaymentFailed({ gateway, gatewayOrderId, gatewayPaymentId }) {
+  const provider = String(gateway || '').trim().toUpperCase();
+  if (!['RAZORPAY', 'CASHFREE', 'DEMO'].includes(provider)) {
+    throw new Error('Unsupported payment provider.');
+  }
+
   const pool = getPool();
   const connection = await pool.getConnection();
   let orderId;
@@ -160,7 +209,7 @@ export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPayment
 
     const [rows] = await connection.execute(
       `SELECT o.order_id, o.status AS order_status, o.payment_status,
-              o.coupon_id, p.payment_id, g.gateway_order_id
+              o.coupon_id, p.payment_id, g.gateway_order_id, g.gateway
        FROM order_payment_gateways g
        INNER JOIN payments p ON p.payment_id = g.payment_id
        INNER JOIN orders o ON o.order_id = p.order_id
@@ -170,7 +219,10 @@ export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPayment
       [gatewayOrderId]
     );
 
-    if (!rows.length) throw new Error('Razorpay order is not linked to a VAGE order.');
+    if (!rows.length || rows[0].gateway !== provider) {
+      throw new Error('Payment reference is not linked to the expected VAGE provider/order.');
+    }
+
     const row = rows[0];
     orderId = Number(row.order_id);
 
@@ -199,8 +251,8 @@ export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPayment
     await connection.execute(
       `UPDATE order_payment_gateways
        SET gateway_payment_id = COALESCE(gateway_payment_id, ?), status = 'FAILED'
-       WHERE gateway_order_id = ? AND status <> 'CAPTURED'`,
-      [gatewayPaymentId || null, gatewayOrderId]
+       WHERE gateway_order_id = ? AND gateway = ? AND status <> 'CAPTURED'`,
+      [gatewayPaymentId ? String(gatewayPaymentId) : null, gatewayOrderId, provider]
     );
     await connection.execute(
       `UPDATE orders
@@ -209,8 +261,6 @@ export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPayment
       [orderId]
     );
 
-    // Coupon usage was counted at order creation; release the reservation
-    // when the unpaid order is finally cancelled.
     if (row.coupon_id) {
       await connection.execute(
         'UPDATE coupons SET usage_count = GREATEST(usage_count - 1, 0) WHERE coupon_id = ?',
@@ -226,4 +276,17 @@ export async function markRazorpayPaymentFailed({ gatewayOrderId, gatewayPayment
   } finally {
     connection.release();
   }
+}
+
+// Backward-compatible Razorpay exports for the existing webhook and cron code.
+export function markRazorpayPaymentCaptured(args) {
+  return markGatewayPaymentCaptured({ ...args, gateway: 'RAZORPAY' });
+}
+
+export function markRazorpayPaymentAuthorized(args) {
+  return markGatewayPaymentAuthorized({ ...args, gateway: 'RAZORPAY' });
+}
+
+export function markRazorpayPaymentFailed(args) {
+  return markGatewayPaymentFailed({ ...args, gateway: 'RAZORPAY' });
 }
