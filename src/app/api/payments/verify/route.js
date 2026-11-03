@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
-import { getPool } from '@/lib/db';
+import { query } from '@/lib/db';
 import { getRazorpay, verifyCheckoutSignature } from '@/lib/razorpay';
 import {
-  markRazorpayPaymentCaptured,
+  fetchCashfreeOrder,
+  fetchCashfreePayments,
+} from '@/lib/payments/cashfree';
+import {
+  markGatewayPaymentCaptured,
+  markGatewayPaymentPending,
+  markRazorpayPaymentAuthorized,
 } from '@/lib/order-payments';
 
 export const runtime = 'nodejs';
@@ -11,6 +17,10 @@ export const dynamic = 'force-dynamic';
 
 function jsonError(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
+}
+
+function toCents(value) {
+  return Math.round(Number(value || 0) * 100);
 }
 
 export async function POST(request) {
@@ -25,96 +35,162 @@ export async function POST(request) {
   }
 
   const orderId = Number(body?.orderId);
-  const gatewayOrderId = typeof body?.razorpay_order_id === 'string'
-    ? body.razorpay_order_id.trim()
-    : '';
-  const paymentId = typeof body?.razorpay_payment_id === 'string'
-    ? body.razorpay_payment_id.trim()
-    : '';
-  const signature = typeof body?.razorpay_signature === 'string'
-    ? body.razorpay_signature.trim()
-    : '';
-
-  if (!Number.isSafeInteger(orderId) || orderId <= 0) return jsonError('Invalid VAGE order ID.');
-  if (!/^order_[A-Za-z0-9]+$/.test(gatewayOrderId)) return jsonError('Invalid Razorpay order ID.');
-  if (!/^pay_[A-Za-z0-9]+$/.test(paymentId)) return jsonError('Invalid Razorpay payment ID.');
-  if (!verifyCheckoutSignature(gatewayOrderId, paymentId, signature)) {
-    return jsonError('Razorpay payment signature could not be verified.', 400);
+  if (!Number.isSafeInteger(orderId) || orderId <= 0) {
+    return jsonError('Invalid VAGE order ID.');
   }
 
-  const pool = getPool();
-  const [linkedRows] = await pool.execute(
-    `SELECT o.order_id, p.amount
-     FROM order_payment_gateways g
-     INNER JOIN payments p ON p.payment_id = g.payment_id
-     INNER JOIN orders o ON o.order_id = p.order_id
-     WHERE o.order_id = ?
-       AND o.user_id = ?
-       AND g.gateway_order_id = ?
+  const linkedRows = await query(
+    `SELECT
+        o.order_id, o.payment_status, o.status AS order_status,
+        p.amount AS payment_amount,
+        g.gateway, g.gateway_order_id, g.gateway_payment_id
+     FROM orders o
+     INNER JOIN payments p ON p.order_id = o.order_id
+     INNER JOIN order_payment_gateways g ON g.payment_id = p.payment_id
+     WHERE o.order_id = ? AND o.user_id = ?
      LIMIT 1`,
-    [orderId, user.id, gatewayOrderId]
+    [orderId, user.id]
   );
 
   if (!linkedRows.length) return jsonError('This payment does not belong to your order.', 404);
+  const linked = linkedRows[0];
+
+  if (linked.payment_status === 'PAID') {
+    return NextResponse.json({ orderId, paymentStatus: 'PAID', alreadyFinal: true });
+  }
 
   try {
-    const payment = await getRazorpay().payments.fetch(paymentId);
+    if (linked.gateway === 'CASHFREE') {
+      const [remoteOrder, paymentResponse] = await Promise.all([
+        fetchCashfreeOrder(linked.gateway_order_id),
+        fetchCashfreePayments(linked.gateway_order_id),
+      ]);
 
-    if (payment.order_id !== gatewayOrderId) {
-      return jsonError('The payment is not linked to this Razorpay order.', 400);
+      if (remoteOrder.order_id !== linked.gateway_order_id) {
+        return jsonError('Cashfree order reference does not match this VAGE order.', 409);
+      }
+
+      const payments = Array.isArray(paymentResponse)
+        ? paymentResponse
+        : Array.isArray(paymentResponse?.data) ? paymentResponse.data : [];
+
+      const successful = payments.find((payment) =>
+        payment.order_id === linked.gateway_order_id &&
+        payment.payment_status === 'SUCCESS'
+      );
+
+      if (remoteOrder.order_status === 'PAID' && successful) {
+        if (
+          toCents(successful.payment_amount) !== toCents(linked.payment_amount) ||
+          String(successful.payment_currency || remoteOrder.order_currency).toUpperCase() !== 'INR'
+        ) {
+          return jsonError('Cashfree payment amount or currency does not match the VAGE order.', 409);
+        }
+
+        const result = await markGatewayPaymentCaptured({
+          gateway: 'CASHFREE',
+          gatewayOrderId: linked.gateway_order_id,
+          gatewayPaymentId: String(successful.cf_payment_id),
+          amount: toCents(successful.payment_amount),
+          currency: successful.payment_currency || remoteOrder.order_currency,
+          signatureVerified: false,
+        });
+
+        return NextResponse.json({
+          orderId: result.orderId,
+          paymentStatus: result.paymentStatus,
+          paymentProvider: 'CASHFREE',
+          emailDelivery: result.emailResults,
+        });
+      }
+
+      await markGatewayPaymentPending({
+        gateway: 'CASHFREE',
+        gatewayOrderId: linked.gateway_order_id,
+      });
+
+      return NextResponse.json({
+        orderId,
+        paymentStatus: 'PENDING',
+        paymentProvider: 'CASHFREE',
+        message: 'Cashfree has not confirmed a successful payment yet. The VAGE order remains pending.',
+      }, { status: 202 });
     }
 
-    if (
-      Number(payment.amount) !== Math.round(Number(linkedRows[0].amount) * 100) ||
-      payment.currency !== 'INR'
-    ) {
-      return jsonError('Payment amount or currency does not match this order.', 400);
-    }
+    if (linked.gateway === 'RAZORPAY') {
+      const gatewayOrderId = typeof body?.razorpay_order_id === 'string'
+        ? body.razorpay_order_id.trim()
+        : '';
+      const paymentId = typeof body?.razorpay_payment_id === 'string'
+        ? body.razorpay_payment_id.trim()
+        : '';
+      const signature = typeof body?.razorpay_signature === 'string'
+        ? body.razorpay_signature.trim()
+        : '';
 
-    if (payment.status === 'failed') {
-      return jsonError('This payment attempt failed. You may retry in Razorpay Checkout; your order remains pending until the checkout session is closed or reconciled.', 402);
-    }
+      if (
+        gatewayOrderId !== linked.gateway_order_id ||
+        !/^order_[A-Za-z0-9]+$/.test(gatewayOrderId) ||
+        !/^pay_[A-Za-z0-9]+$/.test(paymentId)
+      ) {
+        return jsonError('Invalid Razorpay checkout reference.');
+      }
+      if (!verifyCheckoutSignature(gatewayOrderId, paymentId, signature)) {
+        return jsonError('Razorpay payment signature could not be verified.', 400);
+      }
 
-    if (payment.status === 'authorized') {
-      const { markRazorpayPaymentAuthorized } = await import('@/lib/order-payments');
-      await markRazorpayPaymentAuthorized({
+      const payment = await getRazorpay().payments.fetch(paymentId);
+      if (payment.order_id !== gatewayOrderId) {
+        return jsonError('The payment is not linked to this Razorpay order.', 400);
+      }
+      if (toCents(payment.amount) !== toCents(linked.payment_amount) || payment.currency !== 'INR') {
+        return jsonError('Payment amount or currency does not match this order.', 400);
+      }
+
+      if (payment.status === 'authorized') {
+        await markRazorpayPaymentAuthorized({
+          gatewayOrderId,
+          gatewayPaymentId: paymentId,
+        });
+        return NextResponse.json({
+          paymentStatus: 'PENDING',
+          message: 'Your payment is authorised and awaiting capture.',
+        }, { status: 202 });
+      }
+
+      if (payment.status !== 'captured' || payment.captured !== true) {
+        return NextResponse.json({
+          paymentStatus: 'PENDING',
+          message: 'Razorpay has not confirmed a captured payment yet.',
+        }, { status: 202 });
+      }
+
+      const result = await markGatewayPaymentCaptured({
+        gateway: 'RAZORPAY',
         gatewayOrderId,
         gatewayPaymentId: paymentId,
+        amount: payment.amount,
+        currency: payment.currency,
+        signatureVerified: true,
       });
-      return NextResponse.json(
-        {
-          paymentStatus: 'PENDING',
-          message: 'Your payment is authorised and awaiting capture. The order remains pending until Razorpay confirms capture.',
-        },
-        { status: 202 }
-      );
+      return NextResponse.json({
+        orderId: result.orderId,
+        paymentStatus: result.paymentStatus,
+        paymentProvider: 'RAZORPAY',
+        emailDelivery: result.emailResults,
+      });
     }
 
-    if (payment.status !== 'captured' || payment.captured !== true) {
-      return NextResponse.json(
-        {
-          paymentStatus: 'PENDING',
-          message: 'Your payment is not captured yet. We will update your order when Razorpay confirms capture.',
-        },
-        { status: 202 }
-      );
+    if (linked.gateway === 'DEMO') {
+      return jsonError('Use the demo payment simulator to select an outcome.', 409);
     }
 
-    const result = await markRazorpayPaymentCaptured({
-      gatewayOrderId,
-      gatewayPaymentId: paymentId,
-      amount: payment.amount,
-      currency: payment.currency,
-      signatureVerified: true,
-    });
-
-    return NextResponse.json({
-      orderId: result.orderId,
-      paymentStatus: result.paymentStatus,
-      emailDelivery: result.emailResults,
-    });
+    return jsonError('Unsupported payment provider for this order.', 409);
   } catch (error) {
     console.error('[POST /api/payments/verify] Verification failed:', error);
-    return jsonError('Unable to verify payment status right now. Please do not pay again; refresh your order status in a moment.', 502);
+    return jsonError(
+      'Unable to verify payment status right now. Do not pay again; refresh your order status in a moment.',
+      502
+    );
   }
 }
