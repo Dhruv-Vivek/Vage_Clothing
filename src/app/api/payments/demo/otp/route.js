@@ -89,8 +89,8 @@ export async function POST(request) {
          (order_id, user_id, token_hash, otp_salt, otp_hash,
           payment_method, attempts, status, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, 0, 'ACTIVE',
-               DATE_ADD(NOW(), INTERVAL ? SECOND))`,
-      [orderId, user.id, tokenHash, salt, otpHash, paymentMethod, OTP_TTL_SECONDS]
+               DATE_ADD(NOW(), INTERVAL 300 SECOND))`,
+      [orderId, user.id, tokenHash, salt, otpHash, paymentMethod]
     );
 
     await connection.commit();
