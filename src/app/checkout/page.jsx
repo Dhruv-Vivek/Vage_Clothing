@@ -55,6 +55,34 @@ function loadRazorpayScript() {
   });
 }
 
+function loadCashfreeScript() {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Payment checkout is only available in a browser.'));
+      return;
+    }
+    if (window.Cashfree) {
+      resolve(true);
+      return;
+    }
+
+    const existing = document.querySelector('script[data-vage-cashfree="true"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(true), { once: true });
+      existing.addEventListener('error', () => reject(new Error('Unable to load Cashfree Checkout.')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+    script.async = true;
+    script.dataset.vageCashfree = 'true';
+    script.onload = () => resolve(true);
+    script.onerror = () => reject(new Error('Unable to load Cashfree Checkout. Check your internet connection.'));
+    document.body.appendChild(script);
+  });
+}
+
 function Checkout() {
   const router = useRouter();
   const { cartItems, cartTotal, clearCart, isCartLoaded } = useCart();
@@ -73,6 +101,7 @@ function Checkout() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [paymentMessage, setPaymentMessage] = useState('');
+  const [demoCheckout, setDemoCheckout] = useState(null);
 
   const orderPlaced = useRef(false);
   const idempotencyKey = useRef(null);
@@ -166,9 +195,51 @@ function Checkout() {
     }
   };
 
+  const handleDemoOutcome = async (outcome) => {
+    if (!demoCheckout?.orderId || isProcessing) return;
+
+    setIsProcessing(true);
+    setErrorMessage('');
+    setPaymentMessage('Processing the clearly labelled local demo outcome…');
+
+    try {
+      const response = await fetch('/api/payments/demo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({ orderId: demoCheckout.orderId, outcome }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok && response.status !== 202) {
+        throw new Error(result.error || 'Unable to process the demo payment.');
+      }
+
+      if (outcome === 'SUCCESS' || outcome === 'PENDING') {
+        orderPlaced.current = true;
+        clearCart();
+        router.push(`/order-success?orderId=${demoCheckout.orderId}&provider=DEMO`);
+        return;
+      }
+
+      setDemoCheckout(null);
+      setPaymentMessage('');
+      setErrorMessage(
+        outcome === 'USER_DROPPED'
+          ? 'Demo checkout was abandoned. The unpaid order was cancelled and reserved stock was released. Your cart is unchanged.'
+          : 'Demo payment failed. The unpaid order was cancelled and reserved stock was released. Your cart is unchanged.'
+      );
+    } catch (error) {
+      setErrorMessage(error?.message || 'Unable to process the demo payment.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handlePlaceOrder = async () => {
     setErrorMessage('');
     setPaymentMessage('');
+    setDemoCheckout(null);
 
     if (!isLoggedIn) {
       setErrorMessage('Please sign in before checkout.');
@@ -188,8 +259,6 @@ function Checkout() {
     dismissHandled.current = false;
 
     try {
-      await loadRazorpayScript();
-
       if (!idempotencyKey.current) {
         idempotencyKey.current = window.crypto.randomUUID();
       }
@@ -216,9 +285,42 @@ function Checkout() {
         throw new Error(checkout.error || 'Unable to prepare your order.');
       }
 
-      // Once the backend has created the gateway order, a retry must use a new
-      // checkout identity so a failed/cancelled attempt is not reused.
       idempotencyKey.current = null;
+
+      if (checkout.paymentProvider === 'DEMO') {
+        setDemoCheckout(checkout);
+        setPaymentMessage('DEMO MODE — no real payment will be collected. Choose a simulated outcome below.');
+        setIsProcessing(false);
+        return;
+      }
+
+      if (checkout.paymentProvider === 'CASHFREE') {
+        await loadCashfreeScript();
+        if (typeof window.Cashfree !== 'function') {
+          throw new Error('Cashfree Checkout did not initialise correctly.');
+        }
+
+        const cashfree = window.Cashfree({
+          mode: checkout.cashfreeEnvironment === 'production' ? 'production' : 'sandbox',
+        });
+        const result = await cashfree.checkout({
+          paymentSessionId: checkout.paymentSessionId,
+          redirectTarget: '_self',
+        });
+
+        if (result?.error) {
+          throw new Error(result.error.message || 'Cashfree could not open the checkout page.');
+        }
+
+        setPaymentMessage('Cashfree Checkout is opening. Your order will be confirmed only after server-side payment verification.');
+        return;
+      }
+
+      if (checkout.paymentProvider !== 'RAZORPAY') {
+        throw new Error('The configured payment provider returned an unsupported checkout response.');
+      }
+
+      await loadRazorpayScript();
 
       const options = {
         key: checkout.keyId,
@@ -251,30 +353,20 @@ function Checkout() {
                 razorpay_signature: response.razorpay_signature,
               }),
             });
-            const verification = await verifyResponse.json().catch(() => ({}));
 
-            if (
-              verifyResponse.ok ||
-              verifyResponse.status === 202 ||
-              verifyResponse.status >= 500
-            ) {
+            if (verifyResponse.ok || verifyResponse.status === 202 || verifyResponse.status >= 500) {
               orderPlaced.current = true;
               clearCart();
-              router.push(`/order-success?orderId=${checkout.orderId}`);
+              router.push(`/order-success?orderId=${checkout.orderId}&provider=RAZORPAY`);
               return;
             }
 
-            // Reconcile against Razorpay's live payment list before allowing
-            // another checkout attempt. A browser callback alone is not proof
-            // that this order failed or succeeded.
             dismissHandled.current = false;
             await reconcileAbandonedCheckout(checkout.orderId, checkout.razorpayOrderId);
           } catch {
-            // Razorpay has returned a signed success callback. Avoid asking the
-            // customer to pay twice; the webhook and order page can reconcile it.
             orderPlaced.current = true;
             clearCart();
-            router.push(`/order-success?orderId=${checkout.orderId}`);
+            router.push(`/order-success?orderId=${checkout.orderId}&provider=RAZORPAY`);
           } finally {
             setIsProcessing(false);
           }
@@ -288,7 +380,7 @@ function Checkout() {
 
       const razorpay = new window.Razorpay(options);
       razorpay.on('payment.failed', () => {
-        setPaymentMessage('This payment attempt did not complete. You can retry from the Razorpay window; your order will remain pending until the checkout window is closed.');
+        setPaymentMessage('This payment attempt did not complete. You can retry from the Razorpay window; your order remains pending until the checkout window is closed.');
       });
       razorpay.open();
     } catch (error) {
@@ -501,7 +593,7 @@ function Checkout() {
                   </div>
 
                   <p className="text-light-gray text-sm mt-5">
-                    Any active membership discount or shipping benefit is checked against MySQL during order creation. The Razorpay amount is calculated on the server.
+                    Any active membership discount or shipping benefit is checked against MySQL during order creation. The payment amount is calculated on the server.
                   </p>
 
                   <div className="flex gap-4 mt-6">
@@ -528,37 +620,81 @@ function Checkout() {
                   className="bg-dark-secondary border border-dark-border rounded-xl p-8"
                 >
                   <h2 className="text-2xl font-bold text-white mb-6">Secure Payment</h2>
-                  <div className="p-6 bg-dark border border-dark-border rounded-lg mb-6">
-                    <div className="flex items-start gap-3">
-                      <ShieldCheck className="w-6 h-6 text-green-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-white font-semibold mb-2">Powered by Razorpay</p>
-                        <p className="text-light-gray text-sm">
-                          Pay using the payment methods enabled in Razorpay Checkout. Your order is confirmed only after the server verifies a captured payment.
-                        </p>
+                  {demoCheckout ? (
+                    <div className="space-y-5">
+                      <div className="p-6 bg-dark border border-amber-400/40 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <ShieldCheck className="w-6 h-6 text-amber-300 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                              <p className="text-white font-semibold">VAGE Demo Payment</p>
+                              <span className="px-2 py-1 rounded text-[10px] font-bold tracking-wider bg-amber-400/15 text-amber-200 border border-amber-300/30">DEMO MODE</span>
+                            </div>
+                            <p className="text-light-gray text-sm">
+                              This is a local payment simulator. No card, UPI or bank details are collected and no real money is transferred.
+                            </p>
+                            <p className="text-white text-sm mt-3">Order {demoCheckout.orderNumber} · {formatPrice(demoCheckout.amount / 100)}</p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
 
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => setCurrentStep(2)}
-                      disabled={isProcessing}
-                      className="flex-1 py-4 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all disabled:opacity-40"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={handlePlaceOrder}
-                      disabled={isProcessing || hasMissingVariant}
-                      className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all disabled:opacity-50"
-                    >
-                      {isProcessing ? 'Preparing secure payment…' : `Pay ${formatPrice(estimatedTotal)} (estimate)`}
-                    </button>
-                  </div>
-                  <p className="text-light-gray text-xs mt-4">
-                    The amount shown here is an estimate. The final price, stock, membership discount and delivery fee are recalculated by the server before Razorpay opens.
-                  </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {[
+                          ['SUCCESS', 'Simulate successful payment', 'border-green-500/50 text-green-300'],
+                          ['FAILED', 'Simulate failed payment', 'border-red-500/50 text-red-300'],
+                          ['PENDING', 'Simulate pending payment', 'border-amber-500/50 text-amber-200'],
+                          ['USER_DROPPED', 'Simulate customer abandonment', 'border-slate-500 text-slate-200'],
+                        ].map(([outcome, label, style]) => (
+                          <button
+                            key={outcome}
+                            type="button"
+                            onClick={() => handleDemoOutcome(outcome)}
+                            disabled={isProcessing}
+                            className={`p-4 rounded-lg border bg-dark hover:bg-white/5 font-medium text-sm transition-all disabled:opacity-50 ${style}`}
+                          >
+                            {isProcessing ? 'Processing…' : label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-amber-200/80 text-xs">
+                        Demo outcomes are enabled only in local development. They cannot be used in production.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="p-6 bg-dark border border-dark-border rounded-lg mb-6">
+                        <div className="flex items-start gap-3">
+                          <ShieldCheck className="w-6 h-6 text-green-400 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-white font-semibold mb-2">Secure payment processing</p>
+                            <p className="text-light-gray text-sm">
+                              Your payment is handled by the configured provider. VAGE confirms your order only after the server verifies the final payment status.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-4">
+                        <button
+                          onClick={() => setCurrentStep(2)}
+                          disabled={isProcessing}
+                          className="flex-1 py-4 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all disabled:opacity-40"
+                        >
+                          Back
+                        </button>
+                        <button
+                          onClick={handlePlaceOrder}
+                          disabled={isProcessing || hasMissingVariant}
+                          className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all disabled:opacity-50"
+                        >
+                          {isProcessing ? 'Preparing secure payment…' : `Pay ${formatPrice(estimatedTotal)} (estimate)`}
+                        </button>
+                      </div>
+                      <p className="text-light-gray text-xs mt-4">
+                        The amount shown here is an estimate. The final price, stock, membership discount and delivery fee are recalculated by the server before the configured provider opens.
+                      </p>
+                    </>
+                  )}
                 </motion.div>
               )}
             </div>
