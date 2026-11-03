@@ -75,6 +75,7 @@ function validateBody(body) {
   const email = typeof shipping.email === 'string' ? shipping.email.trim().toLowerCase() : '';
   const phoneDigits = typeof shipping.phone === 'string' ? shipping.phone.replace(/\D/g, '') : '';
   const address = typeof shipping.address === 'string' ? shipping.address.trim() : '';
+  const addressLine2 = typeof shipping.addressLine2 === 'string' ? shipping.addressLine2.trim() : '';
   const city = typeof shipping.city === 'string' ? shipping.city.trim() : '';
   const state = typeof shipping.state === 'string' ? shipping.state.trim() : '';
   const pincode = typeof shipping.pincode === 'string' ? shipping.pincode.trim() : '';
@@ -87,6 +88,7 @@ function validateBody(body) {
     return { error: 'Enter a valid Indian phone number with 10 digits (the +91 prefix is added automatically).' };
   }
   if (!address || address.length > 200) return { error: 'Address must contain 1 to 200 characters.' };
+  if (addressLine2.length > 200) return { error: 'Address line 2 must be 200 characters or fewer.' };
   if (!city || city.length > 100) return { error: 'Enter a valid city.' };
   if (!state || state.length > 100) return { error: 'Enter a valid state.' };
   if (!/^[0-9]{6}$/.test(pincode)) return { error: 'Enter a valid 6-digit Indian PIN code.' };
@@ -108,6 +110,7 @@ function validateBody(body) {
     email,
     phone: phoneDigits.length === 10 ? `91${phoneDigits}` : phoneDigits,
     address,
+    addressLine2,
     city,
     state,
     pincode,
@@ -276,9 +279,9 @@ export async function POST(request) {
 
       const [addressResult] = await connection.execute(
         `INSERT INTO addresses
-           (user_id, recipient_name, phone, address_line1, city, state_name, postal_code, country)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'India')`,
-        [user.id, input.fullName, input.phone, input.address, input.city, input.state, input.pincode]
+           (user_id, recipient_name, phone, address_line1, address_line2, city, state_name, postal_code, country)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'India')`,
+        [user.id, input.fullName, input.phone, input.address, input.addressLine2 || null, input.city, input.state, input.pincode]
       );
       const addressId = Number(addressResult.insertId);
 
