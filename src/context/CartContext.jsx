@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 
 const CartContext = createContext(null);
 
@@ -27,6 +28,8 @@ export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [isCartLoaded, setIsCartLoaded] = useState(false);
+  const { user, isLoading: authLoading, isLoggedIn } = useAuth();
+  const wishlistSyncUserRef = useRef(null);
 
   useEffect(() => {
     try {
@@ -56,6 +59,46 @@ export function CartProvider({ children }) {
     if (!isCartLoaded) return;
     localStorage.setItem('favorites', JSON.stringify(favorites));
   }, [favorites, isCartLoaded]);
+ 
+  // Authenticated customers use the MySQL wishlist as the source of truth.
+  // Guest favorites are merged into the account once at sign-in.
+  useEffect(() => {
+    if (!isCartLoaded || authLoading) return;
+    if (!user) {
+      wishlistSyncUserRef.current = null;
+      return;
+    }
+    if (wishlistSyncUserRef.current === user.id) return;
+    wishlistSyncUserRef.current = user.id;
+    let cancelled = false;
+
+    async function syncWishlist() {
+      const localIds = [...new Set(favorites.map((item) => Number(item.productId || item.id))
+        .filter((id) => Number.isSafeInteger(id) && id > 0))];
+      if (localIds.length) {
+        await fetch('/api/account/wishlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          cache: 'no-store',
+          body: JSON.stringify({ productIds: localIds }),
+        });
+      }
+      const response = await fetch('/api/account/wishlist', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Unable to sync wishlist.');
+      if (!cancelled) setFavorites(Array.isArray(body.products) ? body.products : []);
+    }
+
+    syncWishlist().catch((error) => {
+      console.error('Unable to sync the VAGE wishlist:', error);
+      wishlistSyncUserRef.current = null;
+    });
+    return () => { cancelled = true; };
+  }, [isCartLoaded, authLoading, user?.id]);
 
   // A cart line is one exact product variant (product + size + colour).
   const addToCart = (product, variant, quantity = 1) => {
@@ -119,13 +162,42 @@ export function CartProvider({ children }) {
     }));
   };
 
-  const toggleFavorite = (product) => {
-    setFavorites((previous) => {
-      const exists = previous.some((item) => Number(item.id) === Number(product.id));
-      return exists
-        ? previous.filter((item) => Number(item.id) !== Number(product.id))
-        : [...previous, product];
-    });
+  const toggleFavorite = async (product) => {
+    const productId = Number(product.productId || product.id);
+    if (!Number.isSafeInteger(productId) || productId <= 0) return false;
+    const exists = favorites.some((item) => Number(item.productId || item.id) === productId);
+    const next = exists
+      ? favorites.filter((item) => Number(item.productId || item.id) !== productId)
+      : [...favorites, product];
+    setFavorites(next);
+
+    if (isLoggedIn && !authLoading) {
+      try {
+        const response = exists
+          ? await fetch('/api/account/wishlist?productId=' + productId, {
+              method: 'DELETE',
+              credentials: 'same-origin',
+              cache: 'no-store',
+            })
+          : await fetch('/api/account/wishlist', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              cache: 'no-store',
+              body: JSON.stringify({ productId }),
+            });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'Unable to update wishlist.');
+      } catch (error) {
+        console.error('Unable to update the VAGE wishlist:', error);
+        setFavorites((current) => exists
+          ? [...current, product].filter((item, index, items) =>
+              items.findIndex((entry) => Number(entry.productId || entry.id) === Number(item.productId || item.id)) === index)
+          : current.filter((item) => Number(item.productId || item.id) !== productId));
+        return false;
+      }
+    }
+    return true;
   };
 
   const isFavorite = (productId) => favorites.some(
