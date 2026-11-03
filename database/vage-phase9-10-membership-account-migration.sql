@@ -55,7 +55,7 @@ PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
 SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_plans' AND column_name='duration_days')=0,
   'ALTER TABLE membership_plans ADD COLUMN duration_days INT UNSIGNED NOT NULL DEFAULT 365 AFTER price_amount',
   'SELECT ''membership_plans.duration_days already exists'' AS migration_note');
-PREPARE vage_stmt FROM @ddl; EXECUTE PREPARE vage_stmt; DEALLOCATE PREPARE vage_stmt;
+PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
 
 SET @ddl = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='membership_plans' AND column_name='updated_at')=0,
   'ALTER TABLE membership_plans ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
@@ -64,6 +64,25 @@ PREPARE vage_stmt FROM @ddl; EXECUTE vage_stmt; DEALLOCATE PREPARE vage_stmt;
 
 -- A separate purchase record prevents membership payments from being confused
 -- with product orders/payments. Razorpay webhooks can identify either entity.
+CREATE TABLE IF NOT EXISTS user_memberships (
+  membership_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NOT NULL,
+  plan_id BIGINT UNSIGNED NOT NULL,
+  status ENUM('PENDING','ACTIVE','CANCELLED','EXPIRED','FAILED') NOT NULL DEFAULT 'PENDING',
+  starts_at DATETIME DEFAULT NULL,
+  expires_at DATETIME DEFAULT NULL,
+  activated_at DATETIME DEFAULT NULL,
+  cancelled_at DATETIME DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (membership_id),
+  KEY idx_user_memberships_current (user_id, status, expires_at),
+  KEY idx_user_memberships_plan (plan_id, status),
+  CONSTRAINT fk_user_memberships_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_user_memberships_plan FOREIGN KEY (plan_id) REFERENCES membership_plans(plan_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT chk_user_membership_dates CHECK (expires_at IS NULL OR starts_at IS NULL OR expires_at > starts_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS membership_payment_transactions (
   membership_payment_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   membership_id BIGINT UNSIGNED NOT NULL,
@@ -186,7 +205,7 @@ CREATE TABLE IF NOT EXISTS wishlist_items (
 
 -- Verification
 SHOW TABLES LIKE 'membership_plans';
-SHOW TABLES LIKE 'membership_purchases';
+SHOW TABLES LIKE 'membership_payment_transactions';
 SHOW TABLES LIKE 'user_memberships';
 SHOW TABLES LIKE 'saved_addresses';
 SHOW TABLES LIKE 'wishlist_items';
