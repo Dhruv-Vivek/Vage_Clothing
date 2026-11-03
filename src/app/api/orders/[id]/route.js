@@ -27,7 +27,7 @@ export async function GET(_request, context) {
           o.delivery_method, o.total_amount, o.created_at,
           a.recipient_name, a.phone, a.address_line1, a.address_line2,
           a.city, a.state_name, a.postal_code, a.country,
-          p.transaction_ref, p.paid_at, g.gateway_payment_id
+          p.transaction_ref, p.paid_at, p.payment_method, g.gateway AS payment_provider, g.gateway_payment_id
        FROM orders o
        LEFT JOIN addresses a ON a.address_id = o.address_id
        LEFT JOIN payments p ON p.order_id = o.order_id AND p.status = 'SUCCESS'
