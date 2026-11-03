@@ -20,6 +20,7 @@ export async function markGatewayPaymentCaptured({
   currency,
   signatureVerified = false,
   dispatchEmails = true,
+  queueEmails = true,
 }) {
   const provider = String(gateway || '').trim().toUpperCase();
   if (!['RAZORPAY', 'CASHFREE', 'DEMO'].includes(provider)) {
@@ -89,11 +90,13 @@ export async function markGatewayPaymentCaptured({
         [orderId]
       );
 
-      await enqueuePaidOrderEmails(connection, {
-        order_id: orderId,
-        order_number: row.order_number,
-        email: row.email,
-      });
+      if (queueEmails) {
+        await enqueuePaidOrderEmails(connection, {
+          order_id: orderId,
+          order_number: row.order_number,
+          email: row.email,
+        });
+      }
     }
 
     await connection.commit();
