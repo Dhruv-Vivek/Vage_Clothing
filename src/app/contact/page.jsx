@@ -1,7 +1,7 @@
-import ComingSoon from '../../components/ComingSoon';
+import ContactForm from '../../components/ContactForm';
 
 export const metadata = { title: 'Contact | VAGE' };
 
 export default function ContactPage() {
-  return <ComingSoon page="Contact" />;
+  return <ContactForm />;
 }
