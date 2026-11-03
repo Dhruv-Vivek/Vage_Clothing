@@ -66,8 +66,12 @@ export async function POST(request) {
         fetchCashfreePayments(linked.gateway_order_id),
       ]);
 
-      if (remoteOrder.order_id !== linked.gateway_order_id) {
-        return jsonError('Cashfree order reference does not match this VAGE order.', 409);
+      if (
+        remoteOrder.order_id !== linked.gateway_order_id ||
+        toCents(remoteOrder.order_amount) !== toCents(linked.payment_amount) ||
+        String(remoteOrder.order_currency).toUpperCase() !== 'INR'
+      ) {
+        return jsonError('Cashfree order reference, amount or currency does not match this VAGE order.', 409);
       }
 
       const payments = Array.isArray(paymentResponse)
