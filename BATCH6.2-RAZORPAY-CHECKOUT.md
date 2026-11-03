@@ -12,7 +12,7 @@ This batch completes the existing server-created Razorpay Orders API + Standard 
 - Checkout CTA no longer presents the browser estimate as the charge amount. Razorpay receives the server-calculated paise amount.
 - Captured-payment handling queues order confirmation and payment receipt messages, then returns without waiting for Gmail SMTP. The existing email outbox worker performs delivery.
 - The order-success page refreshes the outbox status while queued emails are being processed and displays the order-specific checkout email.
-- Added the missing Razorpay webhook inbox migration. The receiver uses this durable table for event deduplication and processing status.
+- Added the missing Razorpay webhook inbox migration. The receiver verifies the raw-body signature, durably stores each event and returns quickly; a worker fetches the current Razorpay payment state and performs idempotent order reconciliation.
 
 ## Apply the webhook migration
 
@@ -24,7 +24,7 @@ It is additive and re-runnable. It creates `razorpay_webhook_events`, which is r
 
 ## Configure Razorpay Test Mode locally
 
-Use **Test Mode** API credentials first. Do not use live credentials for development or test transactions.
+Use **Test Mode** API credentials first. Do not use live credentials for development or test transactions. The local server rejects a Key ID beginning with `rzp_live_`.
 
 Add or update these entries in the existing `.env.local` file. Do not overwrite the DB, JWT, Gmail or CRON values already there:
 
@@ -52,7 +52,7 @@ The active email provider is Gmail SMTP; no Resend API key is needed for the cur
    - `payment.authorized`
    - `payment.failed`
 
-The local server must be reachable from Razorpay over HTTPS for dashboard webhook delivery. The checkout callback can be tested locally without a public webhook, but webhook delivery itself needs a reachable HTTPS URL.
+The local server must be reachable from Razorpay over HTTPS for dashboard webhook delivery. The webhook route verifies and stores the event, then acknowledges it; the scheduled worker performs payment fetching and reconciliation. The checkout callback can be tested locally without a public webhook, but webhook delivery itself needs a reachable HTTPS URL.
 
 ## Run locally
 
@@ -75,7 +75,7 @@ Ensure the laptop has outbound access to Gmail SMTP port 587 (the current Gmail 
 7. Verify the VAGE order is `CONFIRMED / PAID`, the payment row is `SUCCESS`, the gateway row is `CAPTURED`, and inventory is reserved exactly once.
 8. Confirm two `email_outbox` rows exist: `ORDER_CONFIRMATION` and `PAYMENT_RECEIPT`, initially `PENDING`.
 9. Run the local email worker using the CRON_SECRET (example below). Both events should become `SENT` when Gmail accepts the messages.
-10. Verify the `razorpay_webhook_events` row is `PROCESSED` after a Test Mode webhook is delivered.
+10. Run the scheduled worker and verify the `razorpay_webhook_events` row moves through `RECEIVED` / `PROCESSING` to `PROCESSED` after a Test Mode webhook is delivered.
 11. Test failed payment, modal dismissal and duplicate webhook delivery. Failed/dismissed unpaid orders should release reserved stock once; a captured order must never be cancelled by a late failure event.
 
 ## Verify database state
@@ -105,11 +105,13 @@ LIMIT 10;
 
 ## Trigger the email worker during local development
 
-After a successful order, the payment API only queues email rows. To process them locally, open a separate PowerShell window, set the same CRON_SECRET that is in `.env.local`, then call:
+After a successful order, the payment API only queues email rows. The same scheduled worker also processes received Razorpay webhook events. To process them locally, open a separate PowerShell window and set the same CRON_SECRET that is in `.env.local` (PowerShell does not automatically import `.env.local`):
 
 ```powershell
+$env:CRON_SECRET = "paste-the-local-CRON_SECRET-value-here"
 $headers = @{ Authorization = "Bearer $env:CRON_SECRET" }
 Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/cron/dispatch-email-outbox" -Headers $headers
+Remove-Item Env:CRON_SECRET
 ```
 
 In production, schedule this protected endpoint at a short regular interval. A successful payment response does not wait for Gmail delivery.
