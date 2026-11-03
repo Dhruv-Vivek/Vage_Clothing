@@ -185,7 +185,13 @@ function OrderSuccess() {
                 </div>
               </div>
 
-              {paid && (
+              {paid && demoPayment && (
+                <div className="mt-8 border-t border-dark-border pt-6">
+                  <p className="text-light-gray text-sm">Automated order confirmation and payment emails will be added in a later phase.</p>
+                </div>
+              )}
+
+              {paid && !demoPayment && (
                 <div className="mt-8 border-t border-dark-border pt-6">
                   <div className="flex items-start gap-3">
                     <Mail className="w-5 h-5 text-white flex-shrink-0 mt-0.5" />
@@ -229,7 +235,7 @@ function OrderSuccess() {
                 <h3 className="text-white font-semibold mb-2">What happens next?</h3>
                 <p className="text-light-gray text-sm">
                   {paid
-                    ? 'Your order is recorded in VAGE. The order confirmation and payment receipt are delivered to your account email when the email provider is configured.'
+                    ? (demoPayment ? 'Your simulated order is recorded in VAGE. Automated order-detail emails will be connected in a later phase.' : 'Your order is recorded in VAGE. The order confirmation and payment receipt are delivered to your account email when the email provider is configured.')
                     : failed
                       ? 'Return to your cart and try checkout again when you are ready.'
                       : 'This page checks the order status for a short period. You can safely return later and check this order again.'}
