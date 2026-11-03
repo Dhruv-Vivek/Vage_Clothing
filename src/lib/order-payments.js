@@ -207,7 +207,6 @@ export async function markGatewayPaymentFailed({ gateway, gatewayOrderId, gatewa
 
   const pool = getPool();
   const connection = await pool.getConnection();
-  let orderId;
 
   try {
     await connection.beginTransaction();
@@ -229,12 +228,61 @@ export async function markGatewayPaymentFailed({ gateway, gatewayOrderId, gatewa
     }
 
     const row = rows[0];
-    orderId = Number(row.order_id);
+    const orderId = Number(row.order_id);
 
-    if (row.payment_status === 'PAID' || row.order_status === 'CANCELLED') {
+    if (row.payment_status === 'PAID') {
       await connection.commit();
-      return { orderId, paymentStatus: row.payment_status, alreadyFinal: true };
+      return { orderId, paymentStatus: 'PAID', alreadyFinal: true, stockReleased: false };
     }
+
+    if (row.order_status === 'CANCELLED') {
+      await connection.commit();
+      return {
+        orderId,
+        paymentStatus: row.payment_status,
+        alreadyFinal: true,
+        stockReleased: false,
+      };
+    }
+
+    // The conditional state transition is the idempotency gate for inventory
+    // restoration. Only the transaction that moves PENDING -> CANCELLED may
+    // return stock and coupon usage. A duplicate failure callback cannot add
+    // the same quantity twice.
+    const [cancelResult] = await connection.execute(
+      `UPDATE orders
+       SET status = 'CANCELLED', payment_status = 'FAILED'
+       WHERE order_id = ? AND status = 'PENDING' AND payment_status = 'PENDING'`,
+      [orderId]
+    );
+
+    if (cancelResult.affectedRows !== 1) {
+      const [latest] = await connection.execute(
+        'SELECT status, payment_status FROM orders WHERE order_id = ? LIMIT 1',
+        [orderId]
+      );
+      await connection.commit();
+      return {
+        orderId,
+        paymentStatus: latest[0]?.payment_status || row.payment_status,
+        alreadyFinal: true,
+        stockReleased: false,
+      };
+    }
+
+    await connection.execute(
+      `UPDATE payments
+       SET status = 'FAILED'
+       WHERE payment_id = ? AND status <> 'SUCCESS'`,
+      [row.payment_id]
+    );
+
+    await connection.execute(
+      `UPDATE order_payment_gateways
+       SET gateway_payment_id = COALESCE(gateway_payment_id, ?), status = 'FAILED'
+       WHERE gateway_order_id = ? AND gateway = ? AND status <> 'CAPTURED'`,
+      [gatewayPaymentId ? String(gatewayPaymentId) : null, gatewayOrderId, provider]
+    );
 
     const [items] = await connection.execute(
       'SELECT variant_id, quantity FROM order_items WHERE order_id = ?',
@@ -242,29 +290,17 @@ export async function markGatewayPaymentFailed({ gateway, gatewayOrderId, gatewa
     );
 
     for (const item of items) {
-      await connection.execute(
+      const [restore] = await connection.execute(
         'UPDATE inventory SET stock_quantity = stock_quantity + ? WHERE variant_id = ?',
         [Number(item.quantity), Number(item.variant_id)]
       );
-    }
 
-    await connection.execute(
-      `UPDATE payments SET status = 'FAILED'
-       WHERE payment_id = ? AND status <> 'SUCCESS'`,
-      [row.payment_id]
-    );
-    await connection.execute(
-      `UPDATE order_payment_gateways
-       SET gateway_payment_id = COALESCE(gateway_payment_id, ?), status = 'FAILED'
-       WHERE gateway_order_id = ? AND gateway = ? AND status <> 'CAPTURED'`,
-      [gatewayPaymentId ? String(gatewayPaymentId) : null, gatewayOrderId, provider]
-    );
-    await connection.execute(
-      `UPDATE orders
-       SET status = 'CANCELLED', payment_status = 'FAILED'
-       WHERE order_id = ? AND payment_status <> 'PAID'`,
-      [orderId]
-    );
+      if (restore.affectedRows !== 1) {
+        throw new Error(
+          `Unable to restore reserved stock for variant ${Number(item.variant_id)}. The payment failure transaction was rolled back.`
+        );
+      }
+    }
 
     if (row.coupon_id) {
       await connection.execute(
@@ -274,7 +310,7 @@ export async function markGatewayPaymentFailed({ gateway, gatewayOrderId, gatewa
     }
 
     await connection.commit();
-    return { orderId, paymentStatus: 'FAILED', stockReleased: true };
+    return { orderId, paymentStatus: 'FAILED', stockReleased: true, restoredLines: items.length };
   } catch (error) {
     await connection.rollback();
     throw error;
