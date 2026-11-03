@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 
 const CartContext = createContext(null);
 
@@ -27,6 +28,8 @@ export function CartProvider({ children }) {
   const [cartItems, setCartItems] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [isCartLoaded, setIsCartLoaded] = useState(false);
+  const { user, isLoading: authLoading, isLoggedIn } = useAuth();
+  const wishlistSyncUserRef = useRef(null);
 
   useEffect(() => {
     try {
@@ -53,9 +56,65 @@ export function CartProvider({ children }) {
   }, [cartItems, isCartLoaded]);
 
   useEffect(() => {
-    if (!isCartLoaded) return;
+    // Local storage is only the guest wishlist. Authenticated wishlists live in MySQL.
+    if (!isCartLoaded || isLoggedIn) return;
     localStorage.setItem('favorites', JSON.stringify(favorites));
-  }, [favorites, isCartLoaded]);
+  }, [favorites, isCartLoaded, isLoggedIn]);
+ 
+  const currentUserId = user?.id ?? null;
+
+  // Authenticated customers use the MySQL wishlist as the source of truth.
+  // Guest favorites are merged into the account once at sign-in.
+  useEffect(() => {
+    if (!isCartLoaded || authLoading) return;
+    if (currentUserId === null) {
+      if (wishlistSyncUserRef.current !== null) {
+        wishlistSyncUserRef.current = null;
+        setFavorites([]);
+      }
+      return;
+    }
+    if (wishlistSyncUserRef.current === currentUserId) return;
+    const previousUserId = wishlistSyncUserRef.current;
+    const guestFavorites = previousUserId === null ? favorites : [];
+    if (previousUserId !== null && previousUserId !== currentUserId) setFavorites([]);
+    wishlistSyncUserRef.current = currentUserId;
+    let cancelled = false;
+
+    async function syncWishlist() {
+      const localIds = [...new Set(guestFavorites.map((item) => Number(item.productId || item.id))
+        .filter((id) => Number.isSafeInteger(id) && id > 0))];
+      if (localIds.length) {
+        const mergeResponse = await fetch('/api/account/wishlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          cache: 'no-store',
+          body: JSON.stringify({ productIds: localIds }),
+        });
+        const mergeBody = await mergeResponse.json().catch(() => ({}));
+        if (!mergeResponse.ok) {
+          throw new Error(mergeBody.error || 'Unable to merge guest wishlist.');
+        }
+      }
+      const response = await fetch('/api/account/wishlist', {
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Unable to sync wishlist.');
+      if (!cancelled) {
+        try { localStorage.removeItem('favorites'); } catch { /* local storage may be unavailable */ }
+        setFavorites(Array.isArray(body.products) ? body.products : []);
+      }
+    }
+
+    syncWishlist().catch((error) => {
+      console.error('Unable to sync the VAGE wishlist:', error);
+      wishlistSyncUserRef.current = null;
+    });
+    return () => { cancelled = true; };
+  }, [isCartLoaded, authLoading, currentUserId, favorites]);
 
   // A cart line is one exact product variant (product + size + colour).
   const addToCart = (product, variant, quantity = 1) => {
@@ -119,13 +178,42 @@ export function CartProvider({ children }) {
     }));
   };
 
-  const toggleFavorite = (product) => {
-    setFavorites((previous) => {
-      const exists = previous.some((item) => Number(item.id) === Number(product.id));
-      return exists
-        ? previous.filter((item) => Number(item.id) !== Number(product.id))
-        : [...previous, product];
-    });
+  const toggleFavorite = async (product) => {
+    const productId = Number(product.productId || product.id);
+    if (!Number.isSafeInteger(productId) || productId <= 0) return false;
+    const exists = favorites.some((item) => Number(item.productId || item.id) === productId);
+    const next = exists
+      ? favorites.filter((item) => Number(item.productId || item.id) !== productId)
+      : [...favorites, product];
+    setFavorites(next);
+
+    if (isLoggedIn && !authLoading) {
+      try {
+        const response = exists
+          ? await fetch('/api/account/wishlist?productId=' + productId, {
+              method: 'DELETE',
+              credentials: 'same-origin',
+              cache: 'no-store',
+            })
+          : await fetch('/api/account/wishlist', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              cache: 'no-store',
+              body: JSON.stringify({ productId }),
+            });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'Unable to update wishlist.');
+      } catch (error) {
+        console.error('Unable to update the VAGE wishlist:', error);
+        setFavorites((current) => exists
+          ? [...current, product].filter((item, index, items) =>
+              items.findIndex((entry) => Number(entry.productId || entry.id) === Number(item.productId || item.id)) === index)
+          : current.filter((item) => Number(item.productId || item.id) !== productId));
+        return false;
+      }
+    }
+    return true;
   };
 
   const isFavorite = (productId) => favorites.some(

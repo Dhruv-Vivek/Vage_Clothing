@@ -103,6 +103,11 @@ function Checkout() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [paymentMessage, setPaymentMessage] = useState('');
+  const [savedAddresses, setSavedAddresses] = useState([]);
+  const [selectedSavedAddressId, setSelectedSavedAddressId] = useState('');
+  const [serverQuote, setServerQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
 
   const orderPlaced = useRef(false);
   const idempotencyKey = useRef(null);
@@ -122,11 +127,84 @@ function Checkout() {
   }, [user]);
 
   useEffect(() => {
+    if (!user) {
+      setSavedAddresses([]);
+      setSelectedSavedAddressId('');
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/account/addresses', { credentials: 'same-origin', cache: 'no-store' })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'Unable to load saved addresses.');
+        if (!cancelled) setSavedAddresses(body.addresses || []);
+      })
+      .catch((error) => {
+        console.error('Unable to load saved checkout addresses:', error);
+      });
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const selectSavedAddress = (value) => {
+    setSelectedSavedAddressId(value);
+    if (!value) return;
+    const address = savedAddresses.find((item) => String(item.id) === String(value));
+    if (!address) return;
+    const digits = String(address.phone || '').replace(/\D/g, '');
+    setShippingInfo((current) => ({
+      ...current,
+      fullName: address.recipientName || current.fullName,
+      phone: digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits.slice(-10),
+      address: [address.addressLine1, address.addressLine2].filter(Boolean).join(', '),
+      city: address.city || '',
+      state: address.stateName || '',
+      pincode: address.postalCode || '',
+    }));
+  };
+
+  useEffect(() => {
     if (isCartLoaded && cartItems.length === 0 && !orderPlaced.current) {
       router.replace('/cart');
     }
   }, [isCartLoaded, cartItems.length, router]);
 
+  useEffect(() => {
+    if (!isCartLoaded || isLoading || !isLoggedIn || !cartItems.length ||
+        cartItems.some((item) => !Number.isSafeInteger(Number(item.variantId)) || Number(item.variantId) <= 0)) {
+      setServerQuote(null);
+      setQuoteLoading(false);
+      setQuoteError('');
+      return undefined;
+    }
+    const controller = new AbortController();
+    setQuoteLoading(true);
+    setQuoteError('');
+    fetch('/api/checkout/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal: controller.signal,
+      body: JSON.stringify({
+        items: cartItems.map((item) => ({ variantId: Number(item.variantId), quantity: Number(item.quantity) })),
+        deliveryMethod: selectedDelivery,
+        couponCode: couponCode.trim(),
+      }),
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Unable to calculate checkout estimate.');
+      setServerQuote(payload.quote || null);
+    }).catch((error) => {
+      if (error.name !== 'AbortError') {
+        setServerQuote(null);
+        setQuoteError(error.message || 'Unable to calculate checkout estimate.');
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setQuoteLoading(false);
+    });
+    return () => controller.abort();
+  }, [isCartLoaded, isLoading, isLoggedIn, cartItems, selectedDelivery, couponCode]);
+  
   if (!isCartLoaded || isLoading || cartItems.length === 0) return null;
 
   const hasMissingVariant = cartItems.some((item) => !Number.isSafeInteger(Number(item.variantId)));
@@ -422,6 +500,25 @@ function Checkout() {
                 >
                   <h2 className="text-2xl font-bold text-white mb-6">Shipping Information</h2>
                   <form onSubmit={handleShippingSubmit} className="space-y-4">
+                    {savedAddresses.length > 0 && (
+                      <div className="rounded-xl border border-dark-border bg-dark p-4">
+                        <label htmlFor="saved-checkout-address" className="mb-2 block text-sm font-medium text-white">Use a saved address</label>
+                        <select
+                          id="saved-checkout-address"
+                          value={selectedSavedAddressId}
+                          onChange={(event) => selectSavedAddress(event.target.value)}
+                          className="w-full rounded-lg border border-dark-border bg-dark-secondary px-4 py-3 text-white focus:border-white focus:outline-none"
+                        >
+                          <option value="">Enter a new address</option>
+                          {savedAddresses.map((address) => (
+                            <option key={address.id} value={address.id}>
+                              {address.label}{address.isDefault ? ' (Default)' : ''} — {address.city}, {address.stateName}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="mt-2 text-xs text-light-gray">You can manage saved addresses from My Account. Each order keeps its own delivery-address snapshot.</p>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-white mb-2">Full Name *</label>
@@ -674,18 +771,25 @@ function Checkout() {
                 </div>
 
                 <div className="border-t border-dark-border pt-4 space-y-3">
-                  <div className="flex justify-between text-light-gray">
-                    <span>Subtotal estimate</span>
-                    <span>{formatPrice(cartTotal)}</span>
-                  </div>
-                  <div className="flex justify-between text-light-gray">
-                    <span>Delivery estimate</span>
-                    <span>₹{delivery.price}</span>
-                  </div>
-                  <div className="border-t border-dark-border pt-3 flex justify-between text-white text-xl font-bold">
-                    <span>Estimate</span>
-                    <span>{formatPrice(estimatedTotal)}</span>
-                  </div>
+                  {quoteLoading && <p className="text-xs text-light-gray">Recalculating server estimate…</p>}
+                  {quoteError && <p className="text-xs text-amber-200">{quoteError}</p>}
+                  {serverQuote ? (
+                    <>
+                      <div className="flex justify-between text-light-gray"><span>Subtotal</span><span>{formatPrice(serverQuote.subtotalCents / 100)}</span></div>
+                      {serverQuote.membershipDiscountCents > 0 && <div className="flex justify-between text-light-gray"><span>Membership discount</span><span>− {formatPrice(serverQuote.membershipDiscountCents / 100)}</span></div>}
+                      {serverQuote.couponDiscountCents > 0 && <div className="flex justify-between text-light-gray"><span>Coupon discount</span><span>− {formatPrice(serverQuote.couponDiscountCents / 100)}</span></div>}
+                      {serverQuote.couponError && <p className="text-xs text-amber-200">{serverQuote.couponError}</p>}
+                      <div className="flex justify-between text-light-gray"><span>Delivery</span><span>{serverQuote.shippingCents === 0 ? 'FREE' : formatPrice(serverQuote.shippingCents / 100)}</span></div>
+                      <div className="border-t border-dark-border pt-3 flex justify-between text-white text-xl font-bold"><span>Server estimate</span><span>{formatPrice(serverQuote.totalCents / 100)}</span></div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between text-light-gray"><span>Subtotal estimate</span><span>{formatPrice(cartTotal)}</span></div>
+                      <div className="flex justify-between text-light-gray"><span>Delivery estimate</span><span>{formatPrice(delivery.price)}</span></div>
+                      <div className="border-t border-dark-border pt-3 flex justify-between text-white text-xl font-bold"><span>Estimate</span><span>{formatPrice(estimatedTotal)}</span></div>
+                    </>
+                  )}
+                  <p className="text-[11px] leading-5 text-light-gray/70">The final payable amount is recalculated inside the order-creation transaction and confirmed by the payment provider.</p>
                 </div>
               </motion.div>
             </div>

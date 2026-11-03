@@ -9,9 +9,9 @@ const NAV = [
   { href: '/admin', label: 'Overview', icon: LayoutDashboard, exact: true },
   { href: '/admin/products', label: 'Products', icon: Shirt },
   { href: '/admin/inventory', label: 'Inventory', icon: Boxes },
+  { href: '/admin/orders', label: 'Orders & returns', icon: ShoppingBag },
 ];
 const COMING = [
-  { label: 'Orders', icon: ShoppingBag },
   { label: 'Customers', icon: Users },
   { label: 'Messages', icon: Mail },
 ];

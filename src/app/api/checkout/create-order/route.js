@@ -3,17 +3,14 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { getCurrentUser } from '@/lib/auth';
 import { getPool } from '@/lib/db';
 import { getRazorpay, getRazorpayPublicKey } from '@/lib/razorpay';
+import { DELIVERY, priceCheckout } from '@/lib/checkout-pricing';
 import { getConfiguredPaymentProvider } from '@/lib/payments/config';
 import { createCashfreeOrder } from '@/lib/payments/cashfree';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const DELIVERY = {
-  standard: { enumValue: 'STANDARD', amount: 99 },
-  express: { enumValue: 'EXPRESS', amount: 199 },
-  priority: { enumValue: 'PRIORITY', amount: 250 },
-};
+
 
 function jsonError(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -25,17 +22,6 @@ function cents(value) {
 
 function amount(centsValue) {
   return Number((centsValue / 100).toFixed(2));
-}
-
-function parseJson(value, fallback = []) {
-  if (Array.isArray(value)) return value;
-  if (typeof value !== 'string') return fallback;
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 function validateBody(body) {
@@ -282,112 +268,20 @@ export async function POST(request) {
       );
       const addressId = Number(addressResult.insertId);
 
-      const variantIds = input.items.map((item) => item.variantId);
-      const placeholders = variantIds.map(() => '?').join(',');
-      const [variants] = await connection.execute(
-        `SELECT
-            pv.variant_id, pv.sku, pv.size, pv.color, pv.is_active,
-            p.product_id, p.name AS product_name, p.status AS product_status,
-            COALESCE(pv.price_override, p.base_price) AS unit_price,
-            COALESCE(i.stock_quantity, 0) AS stock_quantity
-         FROM product_variants pv
-         INNER JOIN products p ON p.product_id = pv.product_id
-         LEFT JOIN inventory i ON i.variant_id = pv.variant_id
-         WHERE pv.variant_id IN (${placeholders})
-         ORDER BY pv.variant_id
-         FOR UPDATE`,
-        variantIds
-      );
-
-      if (variants.length !== input.items.length) {
-        throw new Error('One or more selected product variants are no longer available. Refresh your cart.');
-      }
-
-      const variantById = new Map(variants.map((row) => [Number(row.variant_id), row]));
-      let subtotalCents = 0;
-
-      for (const item of input.items) {
-        const variant = variantById.get(item.variantId);
-        if (!variant || !variant.is_active || variant.product_status !== 'ACTIVE') {
-          throw new Error('Your cart contains an inactive product or variant. Remove it and try again.');
-        }
-        if (Number(variant.stock_quantity) < item.quantity) {
-          throw new Error(`Insufficient stock for ${variant.product_name} (${variant.size}, ${variant.color}). Available: ${Number(variant.stock_quantity)}.`);
-        }
-        subtotalCents += cents(variant.unit_price) * item.quantity;
-      }
-
-      const [memberships] = await connection.execute(
-        `SELECT mp.plan_code, mp.discount_percent, mp.free_shipping_minimum,
-                mp.free_shipping_methods
-         FROM user_memberships um
-         INNER JOIN membership_plans mp ON mp.plan_id = um.plan_id
-         WHERE um.user_id = ?
-           AND um.status = 'ACTIVE'
-           AND um.starts_at <= NOW()
-           AND um.expires_at > NOW()
-           AND mp.is_active = 1
-         ORDER BY um.expires_at DESC
-         LIMIT 1
-         FOR UPDATE`,
-        [user.id]
-      );
-      const membership = memberships[0] || null;
-      const membershipDiscountCents = membership
-        ? Math.min(subtotalCents, Math.round(subtotalCents * Number(membership.discount_percent) / 100))
-        : 0;
-
-      let couponId = null;
-      let couponDiscountCents = 0;
-      if (input.couponCode) {
-        const [coupons] = await connection.execute(
-          `SELECT coupon_id, discount_type, discount_value, min_order_amount,
-                  max_discount, usage_limit, usage_count,
-                  (starts_at <= NOW()) AS is_started,
-                  (expires_at > NOW()) AS is_unexpired,
-                  is_active
-           FROM coupons
-           WHERE coupon_code = ?
-           LIMIT 1
-           FOR UPDATE`,
-          [input.couponCode]
-        );
-        const coupon = coupons[0];
-        if (!coupon || !coupon.is_active) throw new Error('Coupon is invalid or inactive.');
-        if (!coupon.is_started || !coupon.is_unexpired) {
-          throw new Error('Coupon is outside its valid date range.');
-        }
-        if (coupon.usage_limit !== null && Number(coupon.usage_count) >= Number(coupon.usage_limit)) {
-          throw new Error('Coupon usage limit has been reached.');
-        }
-        const discountedSubtotal = subtotalCents - membershipDiscountCents;
-        if (discountedSubtotal < cents(coupon.min_order_amount)) {
-          throw new Error('Your order does not meet the minimum amount for this coupon.');
-        }
-        if (coupon.discount_type === 'PERCENT') {
-          couponDiscountCents = Math.round(discountedSubtotal * Number(coupon.discount_value) / 100);
-        } else {
-          couponDiscountCents = cents(coupon.discount_value);
-        }
-        if (coupon.max_discount !== null) {
-          couponDiscountCents = Math.min(couponDiscountCents, cents(coupon.max_discount));
-        }
-        couponDiscountCents = Math.max(0, Math.min(discountedSubtotal, couponDiscountCents));
-        couponId = Number(coupon.coupon_id);
-      }
-
-      const discountCents = Math.min(subtotalCents, membershipDiscountCents + couponDiscountCents);
-      const delivery = DELIVERY[input.deliveryMethod];
-      const methods = parseJson(membership?.free_shipping_methods, []);
-      const freeShippingMinimumCents = membership ? cents(membership.free_shipping_minimum) : Infinity;
-      const shippingCents = membership
-        && methods.includes(input.deliveryMethod)
-        && subtotalCents >= freeShippingMinimumCents
-          ? 0
-          : cents(delivery.amount);
-      totalCents = subtotalCents - discountCents + shippingCents;
-
-      if (totalCents <= 0) throw new Error('The payable amount must be greater than zero.');
+      const pricing = await priceCheckout(connection, {
+        userId: user.id,
+        items: input.items,
+        deliveryMethod: input.deliveryMethod,
+        couponCode: input.couponCode,
+        lock: true,
+        strictCoupon: true,
+      });
+      const {
+        variantById, delivery, subtotalCents, membershipDiscountCents,
+        couponDiscountCents, discountCents, shippingCents,
+      } = pricing;
+      const couponId = pricing.coupon?.id ?? null;
+      totalCents = pricing.totalCents;
 
       orderNumber = `VG-${randomBytes(7).toString('hex').toUpperCase()}`;
       const subtotal = amount(subtotalCents);

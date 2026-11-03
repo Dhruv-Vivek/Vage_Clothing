@@ -41,11 +41,28 @@ export async function GET(_request, context) {
     if (!orders.length) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
 
     const items = await query(
-      `SELECT product_name, sku, size, color, unit_price, quantity, line_total
-       FROM order_items
-       WHERE order_id = ?
-       ORDER BY order_item_id`,
+      `SELECT oi.order_item_id, oi.product_name, oi.sku, oi.size, oi.color,
+              oi.unit_price, oi.quantity, oi.line_total,
+              COALESCE((SELECT SUM(r.quantity) FROM returns r
+                         WHERE r.order_item_id = oi.order_item_id AND r.status <> 'REJECTED'), 0) AS return_requested_quantity
+         FROM order_items oi
+        WHERE oi.order_id = ?
+        ORDER BY oi.order_item_id`,
       [orderId]
+    );
+
+    const returns = await query(
+      `SELECT r.return_id, r.order_item_id, r.quantity, r.reason, r.status,
+              r.resolution_notes, r.refund_amount, r.refund_reference,
+              r.requested_at, r.updated_at
+         FROM returns r INNER JOIN order_items oi ON oi.order_item_id = r.order_item_id
+        WHERE oi.order_id = ? ORDER BY r.requested_at DESC, r.return_id DESC`,
+      [orderId]
+    );
+    const returnWindowRows = await query(
+      `SELECT (NOW() <= DATE_ADD(MAX(changed_at), INTERVAL ? DAY)) AS return_window_open
+         FROM order_status_history WHERE order_id = ? AND new_status = 'DELIVERED'`,
+      [Math.max(1, Math.min(30, Number.parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7)), orderId]
     );
 
     const emailDelivery = await query(
@@ -56,8 +73,18 @@ export async function GET(_request, context) {
       [`order-confirmation/${orderId}`, `payment-receipt/${orderId}`]
     );
 
+    const statusHistory = await query(
+      `SELECT history_id, old_status, new_status, note, changed_at
+       FROM order_status_history
+       WHERE order_id = ?
+       ORDER BY changed_at ASC, history_id ASC`,
+      [orderId]
+    );
+
     return NextResponse.json(
-      { order: orders[0], items, emailDelivery },
+      { order: orders[0], items, emailDelivery, statusHistory, returns,
+        returnWindowOpen: Boolean(returnWindowRows[0]?.return_window_open),
+        canCancel: ['CONFIRMED', 'PROCESSING'].includes(orders[0].status) },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } }
     );
   } catch (error) {

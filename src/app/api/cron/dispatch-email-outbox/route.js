@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { dispatchPendingEmails } from '@/lib/order-email';
 import { dispatchPendingContactEmails } from '@/lib/contact-email';
 import { dispatchPendingRazorpayWebhookEvents } from '@/lib/razorpay-webhook-worker';
+import { queueMembershipExpiryReminders } from '@/lib/email-events';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,12 +19,13 @@ export async function POST(request) {
   }
 
   try {
+    const membershipReminders = await queueMembershipExpiryReminders(100);
     const [orderEmails, contactEmails, razorpayWebhooks] = await Promise.all([
       dispatchPendingEmails(20),
       dispatchPendingContactEmails(20),
       dispatchPendingRazorpayWebhookEvents(10),
     ]);
-    return NextResponse.json({ orderEmails, contactEmails, razorpayWebhooks });
+    return NextResponse.json({ membershipReminders, orderEmails, contactEmails, razorpayWebhooks });
   } catch (error) {
     console.error('[POST /api/cron/dispatch-email-outbox] Failed:', error);
     return NextResponse.json({ error: 'Email outbox dispatch failed.' }, { status: 500 });

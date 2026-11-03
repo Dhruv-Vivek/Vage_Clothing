@@ -2,6 +2,7 @@ import 'server-only';
 
 import { getPool } from '@/lib/db';
 import { getVageMailboxConfig, sendVageEmail } from '@/lib/gmail-mailer';
+import { NOTIFICATION_EVENTS, renderNotificationEmail } from '@/lib/email-events';
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -252,23 +253,26 @@ async function dispatchOne(outboxRow) {
     const payload = typeof outboxRow.payload === 'string'
       ? JSON.parse(outboxRow.payload)
       : outboxRow.payload;
-    const orderId = Number(payload?.orderId);
-    const { order, items } = await loadOrderEmailData(orderId);
     const { user: sender, contactTo } = getVageMailboxConfig();
-
-    if (!['ORDER_CONFIRMATION', 'PAYMENT_RECEIPT'].includes(outboxRow.event_type)) {
-      throw new Error(`Unsupported transactional email event: ${outboxRow.event_type}`);
+    let content;
+    if (NOTIFICATION_EVENTS.has(outboxRow.event_type)) {
+      content = await renderNotificationEmail(outboxRow.event_type, payload);
+    } else {
+      if (!['ORDER_CONFIRMATION', 'PAYMENT_RECEIPT'].includes(outboxRow.event_type)) {
+        throw new Error(`Unsupported transactional email event: ${outboxRow.event_type}`);
+      }
+      const orderId = Number(payload?.orderId);
+      const { order, items } = await loadOrderEmailData(orderId);
+      content = buildEmailContent(outboxRow.event_type, order, items);
     }
-
-    const { html, text } = buildEmailContent(outboxRow.event_type, order, items);
     const eventSlug = outboxRow.event_type.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const sent = await sendVageEmail({
       to: outboxRow.recipient_email,
       replyTo: contactTo,
       subject: outboxRow.subject,
-      html,
-      text,
-      messageId: `<vage-${eventSlug}-${orderId}@${sender.split('@')[1]}>`,
+      html: content.html,
+      text: content.text,
+      messageId: `<vage-${eventSlug}-${outboxRow.email_outbox_id}@${sender.split('@')[1]}>`,
     });
 
     if (!sent.messageId) throw new Error('Gmail SMTP did not return a message ID.');
@@ -301,6 +305,30 @@ async function dispatchOne(outboxRow) {
       error: message,
     };
   }
+}
+
+/** Dispatch previously queued domain notifications by their deterministic outbox keys. */
+export async function dispatchEmailsByDedupeKeys(keys) {
+  const uniqueKeys = [...new Set((Array.isArray(keys) ? keys : [])
+    .filter((key) => typeof key === 'string' && key.length > 0))];
+  if (!uniqueKeys.length) return [];
+  if (uniqueKeys.length > 100) throw new Error('A maximum of 100 email keys can be dispatched at once.');
+  const pool = getPool();
+  const placeholders = uniqueKeys.map(() => '?').join(',');
+  const [rows] = await pool.execute(
+    `SELECT email_outbox_id, dedupe_key, event_type, recipient_email, subject, payload, status
+       FROM email_outbox
+      WHERE dedupe_key IN (${placeholders})
+        AND (
+          status IN ('PENDING','FAILED')
+          OR (status = 'PROCESSING' AND updated_at < DATE_SUB(NOW(), INTERVAL 10 MINUTE))
+        )
+      ORDER BY email_outbox_id`,
+    uniqueKeys
+  );
+  const results = [];
+  for (const row of rows) results.push(await dispatchOne(row));
+  return results;
 }
 
 /** Safe to call repeatedly: unique outbox keys and atomic outbox claims reduce duplicate sends. */

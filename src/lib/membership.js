@@ -3,6 +3,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { getPool } from '@/lib/db';
 import { getRazorpay, getRazorpayPublicKey } from '@/lib/razorpay';
+import { enqueueMembershipActivated } from '@/lib/email-events';
 
 const RENEWAL_WINDOW_DAYS = 30;
 
@@ -160,18 +161,6 @@ export async function getMembershipSnapshot(userId) {
 
 export async function getMembershipPurchaseOwner(userId, paymentId) {
   const [rows] = await getPool().execute(
-    "SELECT mpt.membership_payment_id, mpt.membership_id, mpt.gateway_order_id, " +
-    "mpt.gateway_payment_id, mpt.amount, mpt.currency, mpt.status, um.plan_id " +
-    "FROM membership_payment_transactions mpt " +
-    "INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
-    "WHERE mpt.membership_payment_id = ? AND um.user_id = ? AND mpt.gateway = 'RAZORPAY' LIMIT 1",
-    [paymentId, userId]
-  );
-  return rows[0] || null;
-}
-
-export async function getMembershipPurchaseOwner(userId, paymentId) {
-  const [rows] = await getPool().execute(
     "SELECT mpt.membership_payment_id, mpt.membership_id, mpt.gateway_order_id, mpt.gateway_payment_id, " +
     "mpt.amount, mpt.currency, mpt.status, um.user_id " +
     "FROM membership_payment_transactions mpt INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
@@ -250,7 +239,7 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
       if (Number(currentRows[0].plan_id) !== Number(plan.plan_id)) {
         throw new Error('You already have an active membership. Renew your current plan or wait until it expires before changing plans.');
       }
-      if (!Boolean(currentRows[0].renewal_open)) {
+      if (!currentRows[0].renewal_open) {
         throw new Error('Renewal opens during the final 30 days of your membership.');
       }
       purchaseType = 'RENEWAL';
@@ -265,8 +254,7 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
     const [pendingRows] = await connection.execute(
       "SELECT mpt.membership_payment_id FROM membership_payment_transactions mpt " +
       "INNER JOIN user_memberships um ON um.membership_id = mpt.membership_id " +
-      "WHERE um.user_id = ? AND mpt.status IN ('CREATED','AUTHORIZED') " +
-      "AND mpt.created_at > DATE_SUB(NOW(), INTERVAL 30 MINUTE) LIMIT 1 FOR UPDATE",
+      "WHERE um.user_id = ? AND mpt.status IN ('CREATED','AUTHORIZED') LIMIT 1 FOR UPDATE",
       [user.id]
     );
     if (pendingRows.length) throw new Error('You already have a membership payment in progress. Complete or close that checkout first.');
@@ -320,7 +308,7 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
       plan: mapPlan(plan),
       existing: false,
     };
-  } catch (error) {
+  } catch {
     await pool.execute(
       "UPDATE membership_payment_transactions SET status = 'FAILED' WHERE membership_payment_id = ? AND status = 'CREATED'",
       [paymentId]
@@ -437,6 +425,10 @@ export async function markMembershipPurchaseCaptured({
       "signature_verified = ?, paid_at = NOW() WHERE membership_payment_id = ?",
       [gatewayPaymentId, signatureVerified ? 1 : 0, purchaseId]
     );
+    await enqueueMembershipActivated(connection, {
+      paymentId: Number(purchaseId),
+      userId: Number(payment.user_id),
+    });
 
     await connection.commit();
     return { purchaseId, membershipId: Number(payment.membership_id), status: 'CAPTURED', activated: true };
@@ -448,14 +440,3 @@ export async function markMembershipPurchaseCaptured({
   }
 }
 
-export async function cancelQueuedMembership(userId, membershipId) {
-  const [result] = await getPool().execute(
-    "UPDATE user_memberships SET status = 'CANCELLED', cancelled_at = NOW() " +
-    "WHERE membership_id = ? AND user_id = ? AND status = 'ACTIVE' AND starts_at > NOW()",
-    [membershipId, userId]
-  );
-  if (result.affectedRows !== 1) {
-    throw new Error('Only a future queued renewal can be cancelled. Current memberships remain active until expiry; auto-renewal is not enabled.');
-  }
-  return { cancelled: true };
-}
