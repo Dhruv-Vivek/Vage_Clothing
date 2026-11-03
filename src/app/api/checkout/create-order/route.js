@@ -490,6 +490,8 @@ export async function POST(request) {
         const returnUrl = new URL('/order-success', baseUrl);
         returnUrl.searchParams.set('orderId', String(orderId));
         returnUrl.searchParams.set('provider', 'CASHFREE');
+        // Cashfree substitutes this placeholder with its order ID on return.
+        const cashfreeReturnUrl = `${returnUrl.toString()}&cf_order_id={order_id}`;
 
         const notifyUrl = baseUrl.protocol === 'https:'
           ? new URL('/api/webhooks/cashfree', baseUrl).toString()
@@ -502,9 +504,9 @@ export async function POST(request) {
             id: user.id,
             name: input.fullName,
             email: user.email,
-            phone: `+${input.phone}`,
+            phone: input.phone.slice(-10),
           },
-          returnUrl: returnUrl.toString(),
+          returnUrl: cashfreeReturnUrl,
           notifyUrl,
           idempotencyKey: randomUUID(),
         });
