@@ -62,7 +62,11 @@ function OrderSuccess() {
         setLoadError('');
         setLoading(false);
 
-        if (body.order?.payment_status === 'PENDING' && attempts < 10) {
+        const paymentStillPending = body.order?.payment_status === 'PENDING';
+        const emailsStillPending = (body.emailDelivery || []).some((email) =>
+          ['PENDING', 'PROCESSING'].includes(String(email.status || '').toUpperCase())
+        );
+        if ((paymentStillPending || (body.order?.payment_status === 'PAID' && emailsStillPending)) && attempts < 12) {
           attempts += 1;
           timer = setTimeout(refreshOrder, 2500);
         }
@@ -197,6 +201,11 @@ function OrderSuccess() {
                     <Mail className="w-5 h-5 text-white flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
                       <p className="text-white font-semibold mb-2">Order emails</p>
+                      {order.contact_email && (
+                        <p className="mb-3 text-xs text-light-gray">
+                          Updates will be sent to <span className="text-white">{order.contact_email}</span>
+                        </p>
+                      )}
                       {orderData.emailDelivery?.length ? (
                         <div className="space-y-1">
                           {orderData.emailDelivery.map((email) => (
@@ -240,7 +249,9 @@ function OrderSuccess() {
                 <h3 className="text-white font-semibold mb-2">What happens next?</h3>
                 <p className="text-light-gray text-sm">
                   {paid
-                    ? (demoPayment ? 'Your simulated order is recorded in VAGE. The order confirmation and payment receipt are sent after successful payment.' : 'Your order is recorded in VAGE. The order confirmation and payment receipt are delivered to your account email when the email provider is configured.')
+                    ? (demoPayment
+                      ? 'Your simulated order is recorded in VAGE. No money was collected. Order updates are queued for the email address entered at checkout.'
+                      : 'Your payment has been verified and your order is confirmed. The order confirmation and payment receipt are queued for the email address entered at checkout.')
                     : failed
                       ? 'Return to your cart and try checkout again when you are ready.'
                       : 'This page checks the order status for a short period. You can safely return later and check this order again.'}
