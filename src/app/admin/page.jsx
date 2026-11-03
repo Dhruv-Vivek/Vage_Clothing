@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   IndianRupee, ShoppingBag, PackageCheck, Users, AlertTriangle, Mail,
@@ -14,13 +14,6 @@ function money(value) {
     currency: 'INR',
     maximumFractionDigits: 0,
   }).format(Number(value || 0));
-}
-
-function dateTime(value) {
-  return value ? new Date(value).toLocaleString('en-IN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }) : '—';
 }
 
 function Status({ value }) {
@@ -63,7 +56,7 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -79,9 +72,9 @@ export default function AdminDashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const maxRevenue = useMemo(
     () => Math.max(1, ...(data?.monthlyRevenue || []).map((item) => Number(item.revenue || 0))),
