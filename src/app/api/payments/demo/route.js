@@ -215,7 +215,7 @@ export async function POST(request) {
         paymentProvider: 'DEMO',
         paymentMethod,
         demo: true,
-        emailDelivery: [],
+        emailDelivery: result.emailResults,
       });
     }
 
@@ -232,6 +232,7 @@ export async function POST(request) {
       paymentMethod,
       demo: true,
       stockReleased: result.stockReleased === true,
+      restoredLines: result.restoredLines || 0,
       outcome,
     });
   } catch (error) {
