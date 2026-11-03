@@ -20,6 +20,7 @@ export function validateAddressPayload(body) {
   if (!city || city.length > 100) return { error: 'Enter a valid city.' };
   if (!stateName || stateName.length > 100) return { error: 'Enter a valid state or region.' };
   if (!postalCode || postalCode.length > 20) return { error: 'Enter a valid postal code.' };
+  if (country.length < 2 || country.length > 80) return { error: 'Country must contain 2 to 80 characters.' };
   if (country.toLowerCase() === 'india' && !/^[0-9]{6}$/.test(postalCode)) {
     return { error: 'Indian PIN codes must contain exactly 6 digits.' };
   }
@@ -35,7 +36,7 @@ export function validateAddressPayload(body) {
       stateName,
       postalCode,
       country,
-      isDefault: Boolean(body.isDefault),
+      isDefault: body.isDefault === true,
     },
   };
 }
