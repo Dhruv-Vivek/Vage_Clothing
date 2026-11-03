@@ -222,7 +222,7 @@ async function compensateFailedGatewayCreate(orderId) {
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    console.error('Failed to compensate an incomplete Razorpay order:', error);
+    console.error('Failed to compensate an incomplete payment-provider order:', error);
   } finally {
     connection.release();
   }
@@ -508,7 +508,7 @@ export async function POST(request) {
           customer: {
             id: user.id,
             name: input.fullName,
-            email: user.email,
+            email: input.email,
             phone: input.phone.slice(-10),
           },
           returnUrl: cashfreeReturnUrl,
@@ -590,7 +590,9 @@ export async function POST(request) {
       return jsonError(
         provider === 'CASHFREE'
           ? 'Unable to start Cashfree checkout. Check sandbox credentials and configuration.'
-          : 'Unable to start payment right now. Your reserved stock has been released; please try again.',
+          : provider === 'RAZORPAY'
+            ? 'Unable to start Razorpay checkout. Check the configured API credentials and try again.'
+            : 'Unable to start payment right now. Your reserved stock has been released; please try again.',
         502
       );
     }
