@@ -56,8 +56,16 @@ export async function GET(_request, context) {
       [`order-confirmation/${orderId}`, `payment-receipt/${orderId}`]
     );
 
+    const statusHistory = await query(
+      `SELECT history_id, old_status, new_status, note, changed_at
+       FROM order_status_history
+       WHERE order_id = ?
+       ORDER BY changed_at ASC, history_id ASC`,
+      [orderId]
+    );
+
     return NextResponse.json(
-      { order: orders[0], items, emailDelivery },
+      { order: orders[0], items, emailDelivery, statusHistory },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } }
     );
   } catch (error) {
