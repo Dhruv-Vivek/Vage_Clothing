@@ -58,7 +58,7 @@ export async function PATCH(request, context) {
       await connection.rollback();
       return NextResponse.json({ error: 'Saved address not found.' }, { status: 404 });
     }
-    const makeDefault = address.isDefault || Boolean(existing[0].is_default);
+    const makeDefault = address.isDefault;
     if (makeDefault) {
       await connection.execute('UPDATE saved_addresses SET is_default = 0 WHERE user_id = ?', [user.id]);
     }
@@ -68,18 +68,6 @@ export async function PATCH(request, context) {
       [address.label, address.recipientName, address.phone, address.addressLine1, address.addressLine2, address.city,
         address.stateName, address.postalCode, address.country, makeDefault ? 1 : 0, addressId, user.id]
     );
-    if (!makeDefault) {
-      const [defaults] = await connection.execute(
-        'SELECT saved_address_id FROM saved_addresses WHERE user_id = ? AND is_default = 1 LIMIT 1',
-        [user.id]
-      );
-      if (!defaults.length) {
-        await connection.execute(
-          'UPDATE saved_addresses SET is_default = 1 WHERE saved_address_id = ? AND user_id = ?',
-          [addressId, user.id]
-        );
-      }
-    }
     await connection.commit();
     const [rows] = await pool.execute(
       'SELECT saved_address_id, label, recipient_name, phone, address_line1, address_line2, city, state_name, postal_code, country, is_default, updated_at ' +
