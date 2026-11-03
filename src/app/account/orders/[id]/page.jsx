@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Package, Truck, CreditCard, Mail, CheckCircle2, Clock3 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import OrderActions from '@/components/account/OrderActions';
 
 function money(value) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(Number(value || 0));
@@ -71,6 +72,9 @@ export default function CustomerOrderDetailPage() {
             <span className="rounded-full border border-green-500/30 px-3 py-1 text-xs text-green-200">{order.payment_status}</span>
           </div>
         </motion.div>
+
+        <OrderActions order={order} items={data.items || []} returns={data.returns || []}
+          returnWindowOpen={Boolean(data.returnWindowOpen)} onUpdated={loadOrder} />
 
         {order.status === 'CANCELLED' || order.status === 'RETURNED' ? (
           <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/5 p-5 text-sm text-amber-100">This order is {order.status.toLowerCase()}. Contact VAGE support if you need assistance.</div>

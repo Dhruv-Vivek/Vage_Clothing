@@ -3,6 +3,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { getPool } from '@/lib/db';
 import { getRazorpay, getRazorpayPublicKey } from '@/lib/razorpay';
+import { enqueueMembershipActivated } from '@/lib/email-events';
 
 const RENEWAL_WINDOW_DAYS = 30;
 
@@ -424,6 +425,10 @@ export async function markMembershipPurchaseCaptured({
       "signature_verified = ?, paid_at = NOW() WHERE membership_payment_id = ?",
       [gatewayPaymentId, signatureVerified ? 1 : 0, purchaseId]
     );
+    await enqueueMembershipActivated(connection, {
+      paymentId: Number(purchaseId),
+      userId: Number(payment.user_id),
+    });
 
     await connection.commit();
     return { purchaseId, membershipId: Number(payment.membership_id), status: 'CAPTURED', activated: true };
