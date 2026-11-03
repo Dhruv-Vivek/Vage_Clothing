@@ -72,6 +72,7 @@ function validateBody(body) {
 
   const shipping = body.shippingInfo || {};
   const fullName = typeof shipping.fullName === 'string' ? shipping.fullName.trim() : '';
+  const email = typeof shipping.email === 'string' ? shipping.email.trim().toLowerCase() : '';
   const phoneDigits = typeof shipping.phone === 'string' ? shipping.phone.replace(/\D/g, '') : '';
   const address = typeof shipping.address === 'string' ? shipping.address.trim() : '';
   const city = typeof shipping.city === 'string' ? shipping.city.trim() : '';
@@ -79,6 +80,9 @@ function validateBody(body) {
   const pincode = typeof shipping.pincode === 'string' ? shipping.pincode.trim() : '';
 
   if (fullName.length < 2 || fullName.length > 120) return { error: 'Enter a valid recipient name.' };
+  if (email.length > 190 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { error: 'Enter a valid email address for order updates.' };
+  }
   if (![10, 12].includes(phoneDigits.length) || (phoneDigits.length === 12 && !phoneDigits.startsWith('91'))) {
     return { error: 'Enter a valid Indian phone number with 10 digits (the +91 prefix is added automatically).' };
   }
@@ -101,6 +105,7 @@ function validateBody(body) {
   const normalised = {
     items,
     fullName,
+    email,
     phone: phoneDigits.length === 10 ? `91${phoneDigits}` : phoneDigits,
     address,
     city,
@@ -392,12 +397,12 @@ export async function POST(request) {
 
       const [orderResult] = await connection.execute(
         `INSERT INTO orders
-           (order_number, user_id, address_id, coupon_id, status, payment_status,
+           (order_number, user_id, contact_email, address_id, coupon_id, status, payment_status,
             subtotal, discount_amount, coupon_discount_amount,
             membership_discount_amount, shipping_amount, delivery_method, total_amount)
-         VALUES (?, ?, ?, ?, 'PENDING', 'PENDING', ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, 'PENDING', 'PENDING', ?, ?, ?, ?, ?, ?, ?)`,
         [
-          orderNumber, user.id, addressId, couponId,
+          orderNumber, user.id, input.email, addressId, couponId,
           subtotal, discount, amount(couponDiscountCents),
           amount(membershipDiscountCents), shippingAmount,
           delivery.enumValue, total,
