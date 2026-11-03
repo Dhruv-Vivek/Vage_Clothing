@@ -15,6 +15,7 @@ Run these migrations in order if they have not already been applied:
 1. Batch 5–6 migration (membership, order gateway, webhook inbox, email outbox and order metadata).
 2. `database/vage-batch6-payments-migration.sql` (RAZORPAY payment method and checkout idempotency table).
 3. `database/vage-batch6.1-cashfree-demo-migration.sql` (CASHFREE/DEMO payment methods, gateway session fields, generic idempotency fields and Cashfree webhook inbox).
+4. `database/vage-batch6.1.1-demo-otp-migration.sql` (session storage for the separate local VAGE demo gateway and OTP screen).
 
 The Batch 6.1 migration is additive and re-runnable. It does not drop data or remove Razorpay columns.
 
