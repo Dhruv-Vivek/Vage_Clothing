@@ -81,6 +81,11 @@ function Navbar() {
                 <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-white transition-all duration-300 group-hover:w-full"></span>
               </Link>
             ))}
+            {isLoggedIn && user?.role === 'ADMIN' && (
+              <Link href="/admin" className="text-white/75 hover:text-white transition-colors duration-300">
+                Admin
+              </Link>
+            )}
           </div>
 
           {/* Search Bar */}
@@ -194,6 +199,15 @@ function Navbar() {
                   {link.name}
                 </Link>
               ))}
+              {isLoggedIn && user?.role === 'ADMIN' && (
+                <Link
+                  href="/admin"
+                  className="block py-2 text-white"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Admin dashboard
+                </Link>
+              )}
               {/* Mobile Login Button */}
               {!isLoggedIn && (
                 <button 
