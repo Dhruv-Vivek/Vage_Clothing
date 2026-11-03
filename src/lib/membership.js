@@ -239,7 +239,7 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
       if (Number(currentRows[0].plan_id) !== Number(plan.plan_id)) {
         throw new Error('You already have an active membership. Renew your current plan or wait until it expires before changing plans.');
       }
-      if (!Boolean(currentRows[0].renewal_open)) {
+      if (!currentRows[0].renewal_open) {
         throw new Error('Renewal opens during the final 30 days of your membership.');
       }
       purchaseType = 'RENEWAL';
@@ -308,7 +308,7 @@ export async function createMembershipPurchase(user, planCode, idempotencyKey) {
       plan: mapPlan(plan),
       existing: false,
     };
-  } catch (error) {
+  } catch {
     await pool.execute(
       "UPDATE membership_payment_transactions SET status = 'FAILED' WHERE membership_payment_id = ? AND status = 'CREATED'",
       [paymentId]
