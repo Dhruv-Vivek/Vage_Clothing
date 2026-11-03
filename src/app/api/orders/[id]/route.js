@@ -24,7 +24,7 @@ export async function GET(_request, context) {
           o.order_id, o.order_number, o.status, o.payment_status,
           o.subtotal, o.discount_amount, o.coupon_discount_amount,
           o.membership_discount_amount, o.shipping_amount,
-          o.delivery_method, o.total_amount, o.created_at,
+          o.delivery_method, o.total_amount, o.created_at, o.contact_email,
           a.recipient_name, a.phone, a.address_line1, a.address_line2,
           a.city, a.state_name, a.postal_code, a.country,
           p.transaction_ref, p.paid_at, p.payment_method, g.gateway AS payment_provider, g.gateway_order_id, g.gateway_payment_id
