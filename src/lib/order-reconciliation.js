@@ -67,11 +67,23 @@ export async function reconcilePendingCheckouts(limit = 10) {
           payment.payment_status === 'SUCCESS'
         );
 
-        if (
-          remoteOrder.order_status === 'PAID' &&
-          successful &&
-          toCents(remoteOrder.order_amount) === toCents(successful.payment_amount)
-        ) {
+        if (successful) {
+          if (remoteOrder.order_status !== 'PAID') {
+            await markGatewayPaymentPending({
+              gateway: 'CASHFREE',
+              gatewayOrderId: row.gateway_order_id,
+            });
+            results.push({ orderId: Number(row.order_id), status: 'PENDING', provider: gateway });
+            continue;
+          }
+
+          if (
+            toCents(remoteOrder.order_amount) !== toCents(successful.payment_amount) ||
+            String(remoteOrder.order_currency).toUpperCase() !== String(successful.payment_currency || 'INR').toUpperCase()
+          ) {
+            throw new Error('Cashfree reports a paid order but its amount/currency does not match the payment attempt.');
+          }
+
           const result = await markGatewayPaymentCaptured({
             gateway: 'CASHFREE',
             gatewayOrderId: row.gateway_order_id,
@@ -87,6 +99,10 @@ export async function reconcilePendingCheckouts(limit = 10) {
             emailDelivery: result.emailResults,
           });
           continue;
+        }
+
+        if (remoteOrder.order_status === 'PAID') {
+          throw new Error('Cashfree reports the order as PAID, but no successful payment attempt was returned.');
         }
 
         const outstanding = payments.some((payment) =>
