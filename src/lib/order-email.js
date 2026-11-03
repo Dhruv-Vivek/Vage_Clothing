@@ -1,18 +1,7 @@
 import 'server-only';
 
-import { Resend } from 'resend';
 import { getPool } from '@/lib/db';
-
-let resendClient;
-
-function getResend() {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey || apiKey === 're_your_resend_api_key' || apiKey.startsWith('replace_with_')) {
-    throw new Error('RESEND_API_KEY is missing. Add your Resend API key to .env.local.');
-  }
-  if (!resendClient) resendClient = new Resend(apiKey);
-  return resendClient;
-}
+import { getVageMailboxConfig, sendVageEmail } from '@/lib/gmail-mailer';
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -265,44 +254,37 @@ async function dispatchOne(outboxRow) {
       : outboxRow.payload;
     const orderId = Number(payload?.orderId);
     const { order, items } = await loadOrderEmailData(orderId);
-    const from = process.env.EMAIL_FROM?.trim();
-
-    if (!from || from.includes('your-verified-domain.com')) {
-      throw new Error('EMAIL_FROM is missing or still uses the example domain. Set it to a sender on your verified Resend domain.');
-    }
+    const { user: sender, contactTo } = getVageMailboxConfig();
 
     if (!['ORDER_CONFIRMATION', 'PAYMENT_RECEIPT'].includes(outboxRow.event_type)) {
       throw new Error(`Unsupported transactional email event: ${outboxRow.event_type}`);
     }
 
     const { html, text } = buildEmailContent(outboxRow.event_type, order, items);
-    const { data, error } = await getResend().emails.send(
-      {
-        from,
-        to: [outboxRow.recipient_email],
-        replyTo: process.env.EMAIL_REPLY_TO?.trim() || undefined,
-        subject: outboxRow.subject,
-        html,
-        text,
-      },
-      { idempotencyKey: outboxRow.dedupe_key }
-    );
+    const eventSlug = outboxRow.event_type.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const sent = await sendVageEmail({
+      to: outboxRow.recipient_email,
+      replyTo: contactTo,
+      subject: outboxRow.subject,
+      html,
+      text,
+      messageId: `<vage-${eventSlug}-${orderId}@${sender.split('@')[1]}>`,
+    });
 
-    if (error) throw new Error(error.message || 'Resend failed to send the email.');
-    if (!data?.id) throw new Error('Resend did not return an email message ID.');
+    if (!sent.messageId) throw new Error('Gmail SMTP did not return a message ID.');
 
     await pool.execute(
       `UPDATE email_outbox
        SET status = 'SENT', provider_message_id = ?, sent_at = NOW(), last_error = NULL
        WHERE email_outbox_id = ?`,
-      [data.id, outboxRow.email_outbox_id]
+      [sent.messageId, outboxRow.email_outbox_id]
     );
 
     return {
       id: outboxRow.email_outbox_id,
       eventType: outboxRow.event_type,
       status: 'SENT',
-      providerMessageId: data.id,
+      providerMessageId: sent.messageId,
     };
   } catch (error) {
     const message = String(error?.message || 'Email delivery failed.').slice(0, 950);
