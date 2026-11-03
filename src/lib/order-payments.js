@@ -107,12 +107,14 @@ export async function markGatewayPaymentCaptured({
     connection.release();
   }
 
-  const emailResults = dispatchEmails
-    ? await dispatchPaidOrderEmails(orderId).catch((error) => [{
-        status: 'FAILED',
-        error: String(error?.message || 'Unable to dispatch order emails.'),
-      }])
-    : [{ status: 'QUEUED' }];
+  const emailResults = !queueEmails
+    ? []
+    : dispatchEmails
+      ? await dispatchPaidOrderEmails(orderId).catch((error) => [{
+          status: 'FAILED',
+          error: String(error?.message || 'Unable to dispatch order emails.'),
+        }])
+      : [{ status: 'QUEUED' }];
 
   return { orderId, paymentStatus: 'PAID', emailResults };
 }
