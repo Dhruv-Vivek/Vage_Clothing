@@ -3,7 +3,8 @@
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ShoppingCart, Heart, ArrowLeft, Minus, Plus } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { trackProductEvent } from '@/lib/product-intelligence-client';
 import { useCart } from '@/context/CartContext';
 
 function formatPrice(value) {
@@ -25,6 +26,7 @@ function ProductDetail() {
   const [isAdded, setIsAdded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const viewedProductIdRef = useRef(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -61,6 +63,12 @@ function ProductDetail() {
     const timeout = setTimeout(() => setIsAdded(false), 2000);
     return () => clearTimeout(timeout);
   }, [isAdded]);
+
+  useEffect(() => {
+    if (!product || viewedProductIdRef.current === product.id) return;
+    viewedProductIdRef.current = product.id;
+    trackProductEvent({ eventType: 'PRODUCT_VIEW', productId: product.id });
+  }, [product]);
 
   const selectedVariant = useMemo(
     () => variants.find((variant) => String(variant.variantId) === String(selectedVariantId)) || null,
