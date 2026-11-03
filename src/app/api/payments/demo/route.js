@@ -205,8 +205,8 @@ export async function POST(request) {
         amount: Math.round(paymentAmount * 100),
         currency: 'INR',
         signatureVerified: false,
-        queueEmails: false,
-        dispatchEmails: false,
+        queueEmails: true,
+        dispatchEmails: true,
       });
 
       return NextResponse.json({
