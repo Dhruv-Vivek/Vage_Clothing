@@ -180,25 +180,6 @@ export default function Membership() {
     }
   };
 
-  const cancelQueued = async () => {
-    if (!summary?.queued) return;
-    setMessage(null);
-    try {
-      const response = await fetch('/api/membership/cancel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ membershipId: summary.queued.membershipId }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || 'Unable to cancel the queued renewal.');
-      setMessage({ type: 'success', text: body.message || 'Queued renewal cancelled.' });
-      await loadMembership();
-    } catch (error) {
-      setMessage({ type: 'error', text: error.message || 'Unable to cancel queued renewal.' });
-    }
-  };
-
   const current = summary?.current;
   const queued = summary?.queued;
   const pendingPayments = (summary?.payments || []).filter((payment) =>
@@ -273,7 +254,7 @@ export default function Membership() {
               {queued && (
                 <div className="mt-5 flex flex-col gap-3 border-t border-dark-border pt-5 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-light-gray">Next {queued.name} term begins {formatDate(queued.startsAt)}.</p>
-                  <button onClick={cancelQueued} className="text-sm text-red-300 underline hover:text-red-200">Cancel queued renewal</button>
+                  <span className="text-xs text-light-gray">This renewal is already paid and will begin automatically on the displayed date.</span>
                 </div>
               )}
             </section>
