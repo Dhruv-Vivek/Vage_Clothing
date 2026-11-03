@@ -56,9 +56,10 @@ export function CartProvider({ children }) {
   }, [cartItems, isCartLoaded]);
 
   useEffect(() => {
-    if (!isCartLoaded) return;
+    // Local storage is only the guest wishlist. Authenticated wishlists live in MySQL.
+    if (!isCartLoaded || isLoggedIn) return;
     localStorage.setItem('favorites', JSON.stringify(favorites));
-  }, [favorites, isCartLoaded]);
+  }, [favorites, isCartLoaded, isLoggedIn]);
  
   // Authenticated customers use the MySQL wishlist as the source of truth.
   // Guest favorites are merged into the account once at sign-in.
@@ -100,7 +101,10 @@ export function CartProvider({ children }) {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || 'Unable to sync wishlist.');
-      if (!cancelled) setFavorites(Array.isArray(body.products) ? body.products : []);
+      if (!cancelled) {
+        try { localStorage.removeItem('favorites'); } catch { /* local storage may be unavailable */ }
+        setFavorites(Array.isArray(body.products) ? body.products : []);
+      }
     }
 
     syncWishlist().catch((error) => {
