@@ -101,7 +101,6 @@ function Checkout() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [paymentMessage, setPaymentMessage] = useState('');
-  const [demoCheckout, setDemoCheckout] = useState(null);
 
   const orderPlaced = useRef(false);
   const idempotencyKey = useRef(null);
@@ -195,51 +194,9 @@ function Checkout() {
     }
   };
 
-  const handleDemoOutcome = async (outcome) => {
-    if (!demoCheckout?.orderId || isProcessing) return;
-
-    setIsProcessing(true);
-    setErrorMessage('');
-    setPaymentMessage('Processing the clearly labelled local demo outcome…');
-
-    try {
-      const response = await fetch('/api/payments/demo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        cache: 'no-store',
-        body: JSON.stringify({ orderId: demoCheckout.orderId, outcome }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok && response.status !== 202) {
-        throw new Error(result.error || 'Unable to process the demo payment.');
-      }
-
-      if (outcome === 'SUCCESS' || outcome === 'PENDING') {
-        orderPlaced.current = true;
-        clearCart();
-        router.push(`/order-success?orderId=${demoCheckout.orderId}&provider=DEMO`);
-        return;
-      }
-
-      setDemoCheckout(null);
-      setPaymentMessage('');
-      setErrorMessage(
-        outcome === 'USER_DROPPED'
-          ? 'Demo checkout was abandoned. The unpaid order was cancelled and reserved stock was released. Your cart is unchanged.'
-          : 'Demo payment failed. The unpaid order was cancelled and reserved stock was released. Your cart is unchanged.'
-      );
-    } catch (error) {
-      setErrorMessage(error?.message || 'Unable to process the demo payment.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const handlePlaceOrder = async () => {
     setErrorMessage('');
     setPaymentMessage('');
-    setDemoCheckout(null);
 
     if (!isLoggedIn) {
       setErrorMessage('Please sign in before checkout.');
@@ -288,8 +245,7 @@ function Checkout() {
       idempotencyKey.current = null;
 
       if (checkout.paymentProvider === 'DEMO') {
-        setDemoCheckout(checkout);
-        setPaymentMessage('DEMO MODE — no real payment will be collected. Choose a simulated outcome below.');
+        router.push(`/demo-payment?orderId=${checkout.orderId}`);
         setIsProcessing(false);
         return;
       }
@@ -621,81 +577,37 @@ function Checkout() {
                   className="bg-dark-secondary border border-dark-border rounded-xl p-8"
                 >
                   <h2 className="text-2xl font-bold text-white mb-6">Secure Payment</h2>
-                  {demoCheckout ? (
-                    <div className="space-y-5">
-                      <div className="p-6 bg-dark border border-amber-400/40 rounded-lg">
-                        <div className="flex items-start gap-3">
-                          <ShieldCheck className="w-6 h-6 text-amber-300 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                              <p className="text-white font-semibold">VAGE Demo Payment</p>
-                              <span className="px-2 py-1 rounded text-[10px] font-bold tracking-wider bg-amber-400/15 text-amber-200 border border-amber-300/30">DEMO MODE</span>
-                            </div>
-                            <p className="text-light-gray text-sm">
-                              This is a local payment simulator. No card, UPI or bank details are collected and no real money is transferred.
-                            </p>
-                            <p className="text-white text-sm mt-3">Order {demoCheckout.orderNumber} · {formatPrice(demoCheckout.amount / 100)}</p>
-                          </div>
-                        </div>
+                  <div className="p-6 bg-dark border border-dark-border rounded-lg mb-6">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck className="w-6 h-6 text-green-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-white font-semibold mb-2">Secure payment processing</p>
+                        <p className="text-light-gray text-sm">
+                          Your payment is handled by the configured provider. VAGE confirms your order only after the server verifies the final payment status.
+                        </p>
                       </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {[
-                          ['SUCCESS', 'Simulate successful payment', 'border-green-500/50 text-green-300'],
-                          ['FAILED', 'Simulate failed payment', 'border-red-500/50 text-red-300'],
-                          ['PENDING', 'Simulate pending payment', 'border-amber-500/50 text-amber-200'],
-                          ['USER_DROPPED', 'Simulate customer abandonment', 'border-slate-500 text-slate-200'],
-                        ].map(([outcome, label, style]) => (
-                          <button
-                            key={outcome}
-                            type="button"
-                            onClick={() => handleDemoOutcome(outcome)}
-                            disabled={isProcessing}
-                            className={`p-4 rounded-lg border bg-dark hover:bg-white/5 font-medium text-sm transition-all disabled:opacity-50 ${style}`}
-                          >
-                            {isProcessing ? 'Processing…' : label}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-amber-200/80 text-xs">
-                        Demo outcomes are enabled only in local development. They cannot be used in production.
-                      </p>
                     </div>
-                  ) : (
-                    <>
-                      <div className="p-6 bg-dark border border-dark-border rounded-lg mb-6">
-                        <div className="flex items-start gap-3">
-                          <ShieldCheck className="w-6 h-6 text-green-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-white font-semibold mb-2">Secure payment processing</p>
-                            <p className="text-light-gray text-sm">
-                              Your payment is handled by the configured provider. VAGE confirms your order only after the server verifies the final payment status.
-                            </p>
-                          </div>
-                        </div>
-                      </div>
+                  </div>
 
-                      <div className="flex gap-4">
-                        <button
-                          onClick={() => setCurrentStep(2)}
-                          disabled={isProcessing}
-                          className="flex-1 py-4 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all disabled:opacity-40"
-                        >
-                          Back
-                        </button>
-                        <button
-                          onClick={handlePlaceOrder}
-                          disabled={isProcessing || hasMissingVariant}
-                          className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all disabled:opacity-50"
-                        >
-                          {isProcessing ? 'Preparing secure payment…' : `Pay ${formatPrice(estimatedTotal)} (estimate)`}
-                        </button>
-                      </div>
-                      <p className="text-light-gray text-xs mt-4">
-                        The amount shown here is an estimate. The final price, stock, membership discount and delivery fee are recalculated by the server before the configured provider opens.
-                      </p>
-                    </>
-                  )}
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() => setCurrentStep(2)}
+                      disabled={isProcessing}
+                      className="flex-1 py-4 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all disabled:opacity-40"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={handlePlaceOrder}
+                      disabled={isProcessing || hasMissingVariant}
+                      className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all disabled:opacity-50"
+                    >
+                      {isProcessing ? 'Preparing secure payment…' : `Pay ${formatPrice(estimatedTotal)} (estimate)`}
+                    </button>
+                  </div>
+                  <p className="text-light-gray text-xs mt-4">
+                    The amount shown here is an estimate. The final price, stock, membership discount and delivery fee are recalculated by the server before the configured provider opens.
+                  </p>
                 </motion.div>
               )}
             </div>
