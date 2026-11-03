@@ -104,6 +104,7 @@ export default function Membership() {
     }
     setBusyPlan(plan.code);
     setMessage(null);
+    let purchaseSession = null;
 
     try {
       const response = await fetch('/api/membership/purchases', {
@@ -115,6 +116,7 @@ export default function Membership() {
       });
       const purchase = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(purchase.error || 'Unable to start membership purchase.');
+      purchaseSession = purchase;
 
       await loadRazorpayScript();
       const checkout = new window.Razorpay({
@@ -175,7 +177,33 @@ export default function Membership() {
       });
       checkout.open();
     } catch (error) {
-      setMessage({ type: 'error', text: error.message || 'Unable to start payment. Please try again.' });
+      let messageText = error.message || 'Unable to start payment. Please try again.';
+      if (purchaseSession?.purchaseId) {
+        try {
+          const reconciled = await fetch('/api/membership/abandon', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store',
+            body: JSON.stringify({ purchaseId: purchaseSession.purchaseId }),
+          });
+          const result = await reconciled.json().catch(() => ({}));
+          if (!reconciled.ok) {
+            messageText += ' We could not reconcile the created payment session; check membership status before trying again.';
+          } else if (result.paymentStatus === 'PAID') {
+            messageText = 'Payment was captured before checkout could finish. Your membership is active.';
+            await refresh();
+          } else if (result.paymentStatus === 'PENDING') {
+            messageText = result.message || 'Payment is authorised and awaiting capture. Check its status before starting another purchase.';
+          } else {
+            messageText += ' The incomplete payment session was closed and no membership was activated.';
+          }
+          await loadMembership();
+        } catch {
+          messageText += ' Payment status could not be reconciled. Check membership status before trying again.';
+        }
+      }
+      setMessage({ type: 'error', text: messageText });
       setBusyPlan('');
     }
   };
