@@ -105,11 +105,12 @@ function OrderSuccess() {
   const order = orderData?.order;
   const paid = order?.payment_status === 'PAID';
   const failed = order?.payment_status === 'FAILED';
+  const demoPayment = provider === 'DEMO' || order?.payment_provider === 'DEMO';
   const Icon = paid ? CheckCircle : failed ? XCircle : Clock;
   const statusColor = paid ? 'text-green-400' : failed ? 'text-red-400' : 'text-amber-300';
-  const heading = paid ? 'Payment Confirmed' : failed ? 'Payment Not Completed' : 'Confirming Your Payment';
+  const heading = paid ? (demoPayment ? 'Demo Order Confirmed' : 'Payment Confirmed') : failed ? 'Payment Not Completed' : 'Confirming Your Payment';
   const description = paid
-    ? 'Your payment has been verified and your order is confirmed.'
+    ? (demoPayment ? 'The demo payment was simulated successfully. No real money was collected; the order was recorded for demonstration.' : 'Your payment has been verified and your order is confirmed.')
     : failed
       ? 'The payment was not completed. Your order has been cancelled and reserved stock was released.'
       : (order?.payment_provider === 'CASHFREE' || provider === 'CASHFREE')
@@ -155,6 +156,7 @@ function OrderSuccess() {
                 <div>
                   <p className="text-light-gray text-xs uppercase tracking-wider">Order number</p>
                   <p className="text-white font-mono text-lg">{order.order_number}</p>
+                  {demoPayment && <span className="inline-block mt-2 px-2 py-1 rounded text-[10px] font-bold tracking-wider bg-amber-400/15 text-amber-200 border border-amber-300/30">DEMO MODE · NO REAL PAYMENT</span>}
                 </div>
                 <div className="text-right">
                   <p className="text-light-gray text-xs uppercase tracking-wider">Payment status</p>
