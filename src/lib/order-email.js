@@ -65,7 +65,7 @@ async function loadOrderEmailData(orderId) {
         o.subtotal, o.discount_amount, o.coupon_discount_amount,
         o.membership_discount_amount, o.shipping_amount, o.delivery_method,
         o.total_amount, o.created_at,
-        u.full_name, u.email,
+        u.full_name, COALESCE(NULLIF(o.contact_email, ''), u.email) AS email,
         a.recipient_name, a.phone, a.address_line1, a.address_line2,
         a.city, a.state_name, a.postal_code, a.country,
         p.transaction_ref, p.payment_method, p.paid_at,
@@ -314,7 +314,8 @@ export async function dispatchPaidOrderEmails(orderId) {
   // Recreate missing outbox rows for older PAID orders created before email
   // queuing was enabled (INSERT IGNORE keeps this safe under concurrent retries).
   const [paidOrders] = await pool.execute(
-    `SELECT o.order_id, o.order_number, u.email
+    `SELECT o.order_id, o.order_number,
+            COALESCE(NULLIF(o.contact_email, ''), u.email) AS email
      FROM orders o
      INNER JOIN users u ON u.user_id = o.user_id
      WHERE o.order_id = ? AND o.payment_status = 'PAID'
