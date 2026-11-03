@@ -138,6 +138,7 @@ export function verifyCashfreeWebhookSignature(rawBody, signature, timestamp) {
     typeof rawBody !== 'string' ||
     typeof signature !== 'string' ||
     typeof timestamp !== 'string' ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(signature) ||
     !signature ||
     !timestamp ||
     !/^\d{10,20}$/.test(timestamp)
