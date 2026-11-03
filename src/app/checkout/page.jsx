@@ -91,6 +91,7 @@ function Checkout() {
   const [currentStep, setCurrentStep] = useState(1);
   const [shippingInfo, setShippingInfo] = useState({
     fullName: '',
+    email: '',
     phone: '',
     address: '',
     city: '',
@@ -111,6 +112,7 @@ function Checkout() {
     setShippingInfo((current) => ({
       ...current,
       fullName: current.fullName || user.name || '',
+      email: current.email || user.email || '',
       phone: current.phone || (() => {
         const digits = String(user.phone || '').replace(/\D/g, '');
         return digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits.slice(-10);
@@ -140,6 +142,10 @@ function Checkout() {
 
     if (!isLoggedIn) {
       setErrorMessage('Please sign in before continuing to payment.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(shippingInfo.email.trim()) || shippingInfo.email.trim().length > 190) {
+      setErrorMessage('Enter a valid email address for order updates.');
       return;
     }
     if (hasMissingVariant) {
@@ -200,6 +206,11 @@ function Checkout() {
 
     if (!isLoggedIn) {
       setErrorMessage('Please sign in before checkout.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(shippingInfo.email.trim()) || shippingInfo.email.trim().length > 190) {
+      setErrorMessage('Enter a valid email address for order updates.');
+      setCurrentStep(1);
       return;
     }
     if (hasMissingVariant) {
@@ -288,7 +299,7 @@ function Checkout() {
         order_id: checkout.razorpayOrderId,
         prefill: {
           name: shippingInfo.fullName,
-          email: user?.email || '',
+          email: shippingInfo.email.trim(),
           contact: `+91${shippingInfo.phone}`,
         },
         notes: { order_number: checkout.orderNumber },
@@ -422,12 +433,16 @@ function Checkout() {
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-white mb-2">Email</label>
+                        <label className="block text-sm font-medium text-white mb-2">Email for order updates *</label>
                         <input
                           type="email"
-                          value={user?.email || ''}
-                          readOnly
-                          className="w-full px-4 py-3 bg-dark border border-dark-border rounded-lg text-light-gray"
+                          required
+                          maxLength={190}
+                          autoComplete="email"
+                          value={shippingInfo.email}
+                          onChange={(event) => updateShipping('email', event.target.value)}
+                          placeholder="you@example.com"
+                          className="w-full px-4 py-3 bg-dark border border-dark-border rounded-lg text-white focus:outline-none focus:border-white"
                         />
                       </div>
                     </div>
