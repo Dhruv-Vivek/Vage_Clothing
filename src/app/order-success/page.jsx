@@ -177,6 +177,12 @@ function OrderSuccess() {
               </div>
 
               <div className="space-y-2 text-sm">
+                {order.payment_method && (
+                  <div className="flex justify-between text-light-gray">
+                    <span>Payment method</span>
+                    <span className="text-white">{order.payment_method}{demoPayment ? ' · Demo' : ''}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-light-gray"><span>Subtotal</span><span>{formatPrice(order.subtotal)}</span></div>
                 <div className="flex justify-between text-light-gray"><span>Discounts</span><span>− {formatPrice(order.discount_amount)}</span></div>
                 <div className="flex justify-between text-light-gray"><span>Delivery</span><span>{formatPrice(order.shipping_amount)}</span></div>
