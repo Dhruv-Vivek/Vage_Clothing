@@ -491,7 +491,7 @@ export async function POST(request) {
         returnUrl.searchParams.set('orderId', String(orderId));
         returnUrl.searchParams.set('provider', 'CASHFREE');
         // Cashfree substitutes this placeholder with its order ID on return.
-        const cashfreeReturnUrl = `${returnUrl.toString()}&cf_order_id={order_id}`;
+        const cashfreeReturnUrl = `${returnUrl.toString()}&order_id={order_id}`;
 
         const notifyUrl = baseUrl.protocol === 'https:'
           ? new URL('/api/webhooks/cashfree', baseUrl).toString()
