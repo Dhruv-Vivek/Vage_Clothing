@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { trackProductEvent } from '@/lib/product-intelligence-client';
 import { Trash2, Plus, Minus, ShoppingBag, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
@@ -16,6 +18,17 @@ function formatPrice(value) {
 function Cart() {
   const router = useRouter();
   const { cartItems, removeFromCart, updateQuantity, cartTotal, isCartLoaded } = useCart();
+
+  const cartViewTrackedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isCartLoaded || cartViewTrackedRef.current) return;
+    cartViewTrackedRef.current = true;
+    trackProductEvent({
+      eventType: 'CART_VIEW',
+      itemCount: cartItems.reduce((count, item) => count + Number(item.quantity || 0), 0),
+    });
+  }, [isCartLoaded, cartItems]);
 
   if (!isCartLoaded) return <div className="min-h-[60vh]" />;
 
