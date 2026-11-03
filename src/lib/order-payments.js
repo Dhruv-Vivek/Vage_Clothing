@@ -41,7 +41,8 @@ export async function markGatewayPaymentCaptured({
       `SELECT
           o.order_id, o.order_number, o.user_id, o.status AS order_status,
           o.payment_status, o.total_amount, p.payment_id, p.amount AS payment_amount,
-          p.status AS payment_row_status, u.email,
+          p.status AS payment_row_status,
+          COALESCE(NULLIF(o.contact_email, ''), u.email) AS email,
           g.gateway, g.gateway_order_id, g.gateway_payment_id
        FROM order_payment_gateways g
        INNER JOIN payments p ON p.payment_id = g.payment_id
