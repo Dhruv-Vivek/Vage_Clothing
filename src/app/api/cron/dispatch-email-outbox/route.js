@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { dispatchPendingEmails } from '@/lib/order-email';
+import { dispatchPendingContactEmails } from '@/lib/contact-email';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,8 +17,11 @@ export async function POST(request) {
   }
 
   try {
-    const result = await dispatchPendingEmails(20);
-    return NextResponse.json(result);
+    const [orderEmails, contactEmails] = await Promise.all([
+      dispatchPendingEmails(20),
+      dispatchPendingContactEmails(20),
+    ]);
+    return NextResponse.json({ orderEmails, contactEmails });
   } catch (error) {
     console.error('[POST /api/cron/dispatch-email-outbox] Failed:', error);
     return NextResponse.json({ error: 'Email outbox dispatch failed.' }, { status: 500 });
