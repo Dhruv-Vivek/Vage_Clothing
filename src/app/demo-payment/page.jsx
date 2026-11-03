@@ -104,6 +104,11 @@ function DemoPaymentContent() {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || 'Unable to cancel this demo checkout.');
+      if (body.paymentStatus === 'PAID') {
+        clearCart();
+        router.replace(`/order-success?orderId=${orderId}&provider=DEMO`);
+        return;
+      }
       router.replace('/cart');
     } catch (error) {
       setErrorMessage(error.message || 'Unable to cancel this demo checkout.');
