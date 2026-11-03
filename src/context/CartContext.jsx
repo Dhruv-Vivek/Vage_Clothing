@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { trackProductEvent } from '@/lib/product-intelligence-client';
 
 const CartContext = createContext(null);
 
@@ -130,6 +131,7 @@ export function CartProvider({ children }) {
     }
 
     const id = `variant-${variantId}`;
+    trackProductEvent({ eventType: 'ADD_TO_CART', productId: Number(product.productId || product.id), variantId, quantity: requestedQuantity });
     const unitPrice = Number(variant.unitPrice);
     const stockQuantity = Number(variant.stockQuantity || 0);
     const line = {
@@ -162,7 +164,16 @@ export function CartProvider({ children }) {
   };
 
   const removeFromCart = (lineId) => {
-    setCartItems((previous) => previous.filter((item) => item.id !== lineId));
+    const item = cartItems.find((entry) => entry.id === lineId);
+    if (item && Number.isSafeInteger(Number(item.productId))) {
+      trackProductEvent({
+        eventType: 'REMOVE_FROM_CART',
+        productId: Number(item.productId),
+        variantId: item.variantId || null,
+        quantity: Number(item.quantity || 1),
+      });
+    }
+    setCartItems((previous) => previous.filter((entry) => entry.id !== lineId));
   };
 
   const updateQuantity = (lineId, quantity) => {
@@ -170,6 +181,15 @@ export function CartProvider({ children }) {
     if (!Number.isSafeInteger(nextQuantity) || nextQuantity <= 0) {
       removeFromCart(lineId);
       return;
+    }
+    const current = cartItems.find((item) => item.id === lineId);
+    if (current && nextQuantity !== Number(current.quantity) && Number.isSafeInteger(Number(current.productId))) {
+      trackProductEvent({
+        eventType: 'CART_QUANTITY_UPDATE',
+        productId: Number(current.productId),
+        variantId: current.variantId || null,
+        quantity: nextQuantity,
+      });
     }
     setCartItems((previous) => previous.map((item) => {
       if (item.id !== lineId) return item;
