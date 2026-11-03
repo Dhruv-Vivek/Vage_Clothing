@@ -170,7 +170,7 @@ export default function SavedAddressesPage() {
                 <div key={key} className={key === 'addressLine1' || key === 'addressLine2' ? 'sm:col-span-2' : ''}>
                   <label htmlFor={'address-' + key} className="mb-2 block text-sm text-white">{label}</label>
                   <input id={'address-' + key} required={!['addressLine2'].includes(key)}
-                    maxLength={key === 'addressLine1' || key === 'addressLine2' ? 200 : key === 'recipientName' ? 120 : 100}
+                    maxLength={key === 'addressLine1' || key === 'addressLine2' ? 200 : key === 'recipientName' ? 120 : key === 'label' ? 40 : key === 'country' ? 80 : 100}
                     value={form[key]} onChange={(event) => update(key, event.target.value)}
                     placeholder={placeholder}
                     className="w-full rounded-lg border border-dark-border bg-dark px-4 py-3 text-white outline-none focus:border-white" />
