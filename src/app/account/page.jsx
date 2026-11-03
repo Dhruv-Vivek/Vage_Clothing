@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { UserRound, MapPin, Package, Crown, ShieldCheck, Save, AlertCircle } from 'lucide-react';
+import { UserRound, MapPin, Package, Crown, ShieldCheck, Save, AlertCircle, Heart } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 export default function AccountPage() {
@@ -86,6 +86,7 @@ export default function AccountPage() {
   const links = [
     { href: '/account/orders', title: 'My orders', description: 'View purchases, payment status and delivery progress.', icon: Package },
     { href: '/account/addresses', title: 'Saved addresses', description: 'Manage delivery addresses for faster checkout.', icon: MapPin },
+    { href: '/favorites', title: 'Wishlist', description: 'Keep the products you want to revisit in one place.', icon: Heart },
     { href: '/membership', title: 'Membership', description: 'Review your benefits, active plan and renewal history.', icon: Crown },
   ];
 
