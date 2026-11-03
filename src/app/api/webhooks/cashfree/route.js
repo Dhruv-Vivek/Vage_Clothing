@@ -48,9 +48,9 @@ export async function POST(request) {
     return jsonError('Unsupported Cashfree webhook payload.', 400);
   }
 
-  const providerEventId = createHash('sha256')
-    .update(`${timestamp}.${rawBody}`)
-    .digest('hex');
+  // Hash the provider payload rather than the transport timestamp so retries
+  // of the same event remain deduplicated if delivery headers change.
+  const providerEventId = createHash('sha256').update(rawBody).digest('hex');
 
   const pool = getPool();
   try {
@@ -112,7 +112,7 @@ export async function POST(request) {
       if (
         remoteOrder.order_status === 'PAID' &&
         Number(remoteOrder.order_amount) === Number(successful?.payment_amount) &&
-        remoteOrder.order_currency === (successful?.payment_currency || 'INR') &&
+        String(remoteOrder.order_currency).toUpperCase() === String(successful?.payment_currency || 'INR').toUpperCase() &&
         successful
       ) {
         await markGatewayPaymentCaptured({
