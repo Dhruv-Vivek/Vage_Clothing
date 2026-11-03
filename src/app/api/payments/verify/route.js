@@ -9,6 +9,7 @@ import {
 import {
   markGatewayPaymentCaptured,
   markGatewayPaymentPending,
+  markGatewayPaymentFailed,
   markRazorpayPaymentAuthorized,
 } from '@/lib/order-payments';
 
@@ -105,6 +106,27 @@ export async function POST(request) {
           paymentStatus: result.paymentStatus,
           paymentProvider: 'CASHFREE',
           emailDelivery: result.emailResults,
+        });
+      }
+
+      const terminalAttempts = payments.length > 0 && payments.every((payment) =>
+        ['FAILED', 'USER_DROPPED', 'CANCELLED'].includes(String(payment.payment_status || '').toUpperCase())
+      );
+
+      if (terminalAttempts || remoteOrder.order_status === 'EXPIRED') {
+        const latestAttempt = payments[payments.length - 1];
+        const failedResult = await markGatewayPaymentFailed({
+          gateway: 'CASHFREE',
+          gatewayOrderId: linked.gateway_order_id,
+          gatewayPaymentId: latestAttempt?.cf_payment_id
+            ? String(latestAttempt.cf_payment_id)
+            : null,
+        });
+        return NextResponse.json({
+          orderId,
+          paymentStatus: failedResult.paymentStatus,
+          paymentProvider: 'CASHFREE',
+          message: 'Cashfree did not complete the payment. The unpaid VAGE order was cancelled and reserved stock was released.',
         });
       }
 
