@@ -191,13 +191,7 @@ function OrderSuccess() {
                 </div>
               </div>
 
-              {paid && demoPayment && (
-                <div className="mt-8 border-t border-dark-border pt-6">
-                  <p className="text-light-gray text-sm">Automated order confirmation and payment emails will be added in a later phase.</p>
-                </div>
-              )}
-
-              {paid && !demoPayment && (
+              {paid && (
                 <div className="mt-8 border-t border-dark-border pt-6">
                   <div className="flex items-start gap-3">
                     <Mail className="w-5 h-5 text-white flex-shrink-0 mt-0.5" />
@@ -206,13 +200,18 @@ function OrderSuccess() {
                       {orderData.emailDelivery?.length ? (
                         <div className="space-y-1">
                           {orderData.emailDelivery.map((email) => (
-                            <p className="text-light-gray text-sm" key={email.event_type}>
-                              {email.event_type === 'PAYMENT_RECEIPT' ? 'Payment receipt' : 'Order confirmation'}: {email.status}
-                            </p>
+                            <div key={email.event_type}>
+                              <p className="text-light-gray text-sm">
+                                {email.event_type === 'PAYMENT_RECEIPT' ? 'Payment receipt' : 'Order confirmation'}: {email.status}
+                              </p>
+                              {email.status === 'FAILED' && email.last_error && (
+                                <p className="text-red-300/80 text-xs mt-1">{email.last_error}</p>
+                              )}
+                            </div>
                           ))}
                         </div>
                       ) : (
-                        <p className="text-light-gray text-sm">Order email is queued after payment verification.</p>
+                        <p className="text-light-gray text-sm">Order confirmation and payment receipt are being prepared.</p>
                       )}
                       <button
                         onClick={resendEmails}
@@ -241,7 +240,7 @@ function OrderSuccess() {
                 <h3 className="text-white font-semibold mb-2">What happens next?</h3>
                 <p className="text-light-gray text-sm">
                   {paid
-                    ? (demoPayment ? 'Your simulated order is recorded in VAGE. Automated order-detail emails will be connected in a later phase.' : 'Your order is recorded in VAGE. The order confirmation and payment receipt are delivered to your account email when the email provider is configured.')
+                    ? (demoPayment ? 'Your simulated order is recorded in VAGE. The order confirmation and payment receipt are sent after successful payment.' : 'Your order is recorded in VAGE. The order confirmation and payment receipt are delivered to your account email when the email provider is configured.')
                     : failed
                       ? 'Return to your cart and try checkout again when you are ready.'
                       : 'This page checks the order status for a short period. You can safely return later and check this order again.'}
