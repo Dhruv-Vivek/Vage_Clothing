@@ -12,7 +12,6 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const DEMO_OTP = '111000';
 const MAX_OTP_ATTEMPTS = 5;
 const PAYMENT_METHODS = new Set(['UPI', 'CARD', 'NETBANKING', 'WALLET']);
 const OUTCOMES = new Set(['SUCCESS', 'FAILED', 'PENDING', 'USER_DROPPED']);
@@ -136,7 +135,7 @@ export async function POST(request) {
     }
 
     const candidateHash = sha256(`${session.otp_salt}:${otp}`);
-    if (!safeHexEqual(candidateHash, session.otp_hash) || otp !== DEMO_OTP) {
+    if (!safeHexEqual(candidateHash, session.otp_hash)) {
       const nextAttempts = Number(session.attempts) + 1;
       await connection.execute(
         `UPDATE demo_payment_otp_sessions
