@@ -109,7 +109,12 @@ export async function POST(request) {
         payment.payment_status === 'SUCCESS'
       );
 
-      if (remoteOrder.order_status === 'PAID' && successful) {
+      if (
+        remoteOrder.order_status === 'PAID' &&
+        Number(remoteOrder.order_amount) === Number(successful?.payment_amount) &&
+        remoteOrder.order_currency === (successful?.payment_currency || 'INR') &&
+        successful
+      ) {
         await markGatewayPaymentCaptured({
           gateway: 'CASHFREE',
           gatewayOrderId,
