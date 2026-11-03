@@ -3,6 +3,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { getCurrentUser } from '@/lib/auth';
 import { getPool } from '@/lib/db';
 import { getRazorpay, getRazorpayPublicKey } from '@/lib/razorpay';
+import { getConfiguredPaymentProvider } from '@/lib/payments/config';
+import { createCashfreeOrder } from '@/lib/payments/cashfree';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -126,6 +128,7 @@ async function findExistingCheckout(userId, idempotencyKey, requestHash) {
   const [rows] = await pool.execute(
     `SELECT
         k.request_hash, k.order_id, k.razorpay_order_id,
+        k.gateway_order_id, k.payment_session_id, k.payment_provider,
         o.order_number, o.total_amount, o.payment_status, o.status
      FROM checkout_idempotency_keys k
      LEFT JOIN orders o ON o.order_id = k.order_id
@@ -140,24 +143,31 @@ async function findExistingCheckout(userId, idempotencyKey, requestHash) {
   if (row.request_hash !== requestHash) {
     return { conflict: 'This idempotency key was already used with different checkout details.' };
   }
-  if (
-    !row.order_id ||
-    !row.razorpay_order_id ||
-    row.payment_status !== 'PENDING' ||
-    row.status !== 'PENDING'
-  ) {
+
+  const provider = String(row.payment_provider || (row.razorpay_order_id ? 'RAZORPAY' : '')).toUpperCase();
+  const gatewayOrderId = row.gateway_order_id || row.razorpay_order_id;
+  if (!row.order_id || !gatewayOrderId || row.payment_status !== 'PENDING' || row.status !== 'PENDING') {
     return { conflict: 'This checkout attempt is no longer active. Start checkout again.' };
   }
 
-  return {
+  const common = {
     existing: true,
     orderId: Number(row.order_id),
     orderNumber: row.order_number,
     amount: cents(row.total_amount),
     currency: 'INR',
-    razorpayOrderId: row.razorpay_order_id,
-    keyId: getRazorpayPublicKey(),
+    paymentProvider: provider,
   };
+
+  if (provider === 'DEMO') return { ...common, demoMode: true };
+  if (provider === 'CASHFREE') {
+    if (!row.payment_session_id) return { conflict: 'The Cashfree session is incomplete. Start checkout again.' };
+    return { ...common, cashfreeOrderId: gatewayOrderId, paymentSessionId: row.payment_session_id, cashfreeEnvironment: process.env.CASHFREE_ENV || 'sandbox' };
+  }
+  if (provider === 'RAZORPAY') {
+    return { ...common, razorpayOrderId: gatewayOrderId, keyId: getRazorpayPublicKey() };
+  }
+  return { conflict: 'This checkout uses an unsupported payment provider. Start checkout again.' };
 }
 
 async function compensateFailedGatewayCreate(orderId) {
@@ -216,6 +226,13 @@ async function compensateFailedGatewayCreate(orderId) {
 export async function POST(request) {
   const user = await getCurrentUser();
   if (!user) return jsonError('Please sign in before checkout.', 401);
+
+  let provider;
+  try {
+    provider = getConfiguredPaymentProvider();
+  } catch (error) {
+    return jsonError(error.message || 'Payment provider is not configured.', 503);
+  }
 
   let body;
   try {
@@ -415,8 +432,8 @@ export async function POST(request) {
 
       const [paymentResult] = await connection.execute(
         `INSERT INTO payments (order_id, payment_method, status, amount)
-         VALUES (?, 'RAZORPAY', 'PENDING', ?)`,
-        [orderId, total]
+         VALUES (?, ?, 'PENDING', ?)`,
+        [orderId, provider, total]
       );
       paymentId = Number(paymentResult.insertId);
 
@@ -454,31 +471,102 @@ export async function POST(request) {
     }
 
     try {
-      const razorpayOrder = await getRazorpay().orders.create({
-        amount: totalCents,
-        currency: 'INR',
-        receipt: orderNumber,
-        notes: {
-          vage_order_id: String(orderId),
-          vage_order_number: orderNumber,
-          vage_user_id: String(user.id),
-        },
-      });
+      let gatewayOrderId;
+      let paymentSessionId = null;
+      let response;
+
+      if (provider === 'DEMO') {
+        gatewayOrderId = `demo_vage_${orderId}_${randomBytes(8).toString('hex')}`;
+        response = {
+          orderId,
+          orderNumber,
+          amount: totalCents,
+          currency: 'INR',
+          paymentProvider: 'DEMO',
+          demoMode: true,
+        };
+      } else if (provider === 'CASHFREE') {
+        const baseUrl = new URL(process.env.APP_BASE_URL || new URL(request.url).origin);
+        const returnUrl = new URL('/order-success', baseUrl);
+        returnUrl.searchParams.set('orderId', String(orderId));
+        returnUrl.searchParams.set('provider', 'CASHFREE');
+
+        const notifyUrl = baseUrl.protocol === 'https:'
+          ? new URL('/api/webhooks/cashfree', baseUrl).toString()
+          : undefined;
+
+        const cashfreeOrder = await createCashfreeOrder({
+          orderId: `vage_${orderId}_${randomBytes(5).toString('hex')}`,
+          amount: amount(totalCents),
+          customer: {
+            id: user.id,
+            name: input.fullName,
+            email: user.email,
+            phone: `+${input.phone}`,
+          },
+          returnUrl: returnUrl.toString(),
+          notifyUrl,
+          idempotencyKey: randomBytes(16).toString('hex'),
+        });
+
+        gatewayOrderId = cashfreeOrder.orderId;
+        paymentSessionId = cashfreeOrder.paymentSessionId;
+        response = {
+          orderId,
+          orderNumber,
+          amount: totalCents,
+          currency: 'INR',
+          paymentProvider: 'CASHFREE',
+          cashfreeOrderId: gatewayOrderId,
+          paymentSessionId,
+          cashfreeEnvironment: cashfreeOrder.environment,
+        };
+      } else if (provider === 'RAZORPAY') {
+        const razorpayOrder = await getRazorpay().orders.create({
+          amount: totalCents,
+          currency: 'INR',
+          receipt: orderNumber,
+          notes: {
+            vage_order_id: String(orderId),
+            vage_order_number: orderNumber,
+            vage_user_id: String(user.id),
+          },
+        });
+        gatewayOrderId = razorpayOrder.id;
+        response = {
+          orderId,
+          orderNumber,
+          amount: totalCents,
+          currency: 'INR',
+          paymentProvider: 'RAZORPAY',
+          razorpayOrderId: gatewayOrderId,
+          keyId: getRazorpayPublicKey(),
+        };
+      } else {
+        throw new Error('Unsupported payment provider.');
+      }
 
       const connection2 = await pool.getConnection();
       try {
         await connection2.beginTransaction();
         await connection2.execute(
           `INSERT INTO order_payment_gateways
-             (payment_id, gateway, gateway_order_id, status)
-           VALUES (?, 'RAZORPAY', ?, 'CREATED')`,
-          [paymentId, razorpayOrder.id]
+             (payment_id, gateway, gateway_order_id, payment_session_id, status)
+           VALUES (?, ?, ?, ?, 'CREATED')`,
+          [paymentId, provider, gatewayOrderId, paymentSessionId]
         );
         await connection2.execute(
           `UPDATE checkout_idempotency_keys
-           SET razorpay_order_id = ?
+           SET gateway_order_id = ?,
+               payment_session_id = ?,
+               payment_provider = ?,
+               razorpay_order_id = CASE WHEN ? = 'RAZORPAY' THEN ? ELSE razorpay_order_id END
            WHERE user_id = ? AND idempotency_key = ?`,
-          [razorpayOrder.id, user.id, input.idempotencyKey]
+          [
+            gatewayOrderId, paymentSessionId, provider, provider,
+            provider === 'RAZORPAY' ? gatewayOrderId : null,
+            user.id, input.idempotencyKey,
+          ]
         );
         await connection2.commit();
       } catch (error) {
@@ -488,18 +576,16 @@ export async function POST(request) {
         connection2.release();
       }
 
-      return NextResponse.json({
-        orderId,
-        orderNumber,
-        amount: totalCents,
-        currency: 'INR',
-        razorpayOrderId: razorpayOrder.id,
-        keyId: getRazorpayPublicKey(),
-      });
+      return NextResponse.json(response);
     } catch (error) {
       await compensateFailedGatewayCreate(orderId);
-      console.error('Razorpay order creation failed:', error);
-      return jsonError('Unable to start payment right now. Your cart has been kept; please try again.', 502);
+      console.error(`${provider} order creation failed:`, error);
+      return jsonError(
+        provider === 'CASHFREE'
+          ? 'Unable to start Cashfree checkout. Check sandbox credentials and configuration.'
+          : 'Unable to start payment right now. Your reserved stock has been released; please try again.',
+        502
+      );
     }
   } catch (error) {
     console.error('[POST /api/checkout/create-order] Checkout failed:', error);
