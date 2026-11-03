@@ -58,11 +58,18 @@ export async function POST(request) {
 
   try {
     await connection.beginTransaction();
-    const [countRows] = await connection.execute(
+    const [userRows] = await connection.execute(
       'SELECT user_id FROM users WHERE user_id = ? FOR UPDATE',
       [user.id]
     );
-    const [countRows] = await connection.execute('SELECT COUNT(*) AS total FROM saved_addresses WHERE user_id = ?', [user.id]);
+    if (!userRows.length) {
+      await connection.rollback();
+      return NextResponse.json({ error: 'Account not found.' }, { status: 404 });
+    }
+    const [countRows] = await connection.execute(
+      'SELECT COUNT(*) AS total FROM saved_addresses WHERE user_id = ?',
+      [user.id]
+    );
     if (Number(countRows[0]?.total || 0) >= 20) {
       await connection.rollback();
       return NextResponse.json({ error: 'You can save up to 20 addresses.' }, { status: 409 });
