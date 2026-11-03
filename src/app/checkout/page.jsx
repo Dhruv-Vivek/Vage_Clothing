@@ -124,8 +124,10 @@ function Checkout() {
     }));
   }, [user]);
 
+  const currentUserId = user?.id;
+
   useEffect(() => {
-    if (!user) {
+    if (!currentUserId) {
       setSavedAddresses([]);
       setSelectedSavedAddressId('');
       return;
@@ -141,7 +143,7 @@ function Checkout() {
         console.error('Unable to load saved checkout addresses:', error);
       });
     return () => { cancelled = true; };
-  }, [user?.id]);
+  }, [currentUserId]);
 
   const selectSavedAddress = (value) => {
     setSelectedSavedAddressId(value);
