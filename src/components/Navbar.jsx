@@ -116,6 +116,8 @@ function Navbar() {
                     Admin
                   </Link>
                 )}
+                <Link href="/account" className="text-sm text-light-gray transition-colors hover:text-white">Account</Link>
+                <Link href="/account/orders" className="text-sm text-light-gray transition-colors hover:text-white">Orders</Link>
                 <div className="flex items-center gap-2 text-white">
                   <User className="w-5 h-5" />
                   <span className="text-sm font-medium">{user.name}</span>
@@ -202,6 +204,13 @@ function Navbar() {
                   {link.name}
                 </Link>
               ))}
+              {isLoggedIn && (
+                <>
+                  <Link href="/account" className="block border-t border-dark-border pt-4 text-light-gray hover:text-white" onClick={() => setMobileMenuOpen(false)}>My Account</Link>
+                  <Link href="/account/orders" className="block text-light-gray hover:text-white" onClick={() => setMobileMenuOpen(false)}>My Orders</Link>
+                  <Link href="/account/addresses" className="block text-light-gray hover:text-white" onClick={() => setMobileMenuOpen(false)}>Saved Addresses</Link>
+                </>
+              )}
               {/* Mobile Login Button */}
               {!isLoggedIn && (
                 <button 
