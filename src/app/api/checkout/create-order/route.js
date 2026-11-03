@@ -506,7 +506,7 @@ export async function POST(request) {
           },
           returnUrl: returnUrl.toString(),
           notifyUrl,
-          idempotencyKey: randomBytes(16).toString('hex'),
+          idempotencyKey: randomUUID(),
         });
 
         gatewayOrderId = cashfreeOrder.orderId;
