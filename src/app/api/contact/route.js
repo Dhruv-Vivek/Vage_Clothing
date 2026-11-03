@@ -10,7 +10,10 @@ function jsonError(message, status = 400) {
 }
 
 function clean(value, maxLength) {
-  return String(value ?? '').replaceAll('\u0000', '').trim().slice(0, maxLength);
+  return String(value ?? '')
+    .replaceAll(String.fromCharCode(0), '')
+    .trim()
+    .slice(0, maxLength);
 }
 
 export async function POST(request) {

@@ -98,7 +98,21 @@ export async function getCurrentUser() {
   );
 
   if (!rows.length) return null;
-  return toPublicUser(rows[0]);
+  const user = toPublicUser(rows[0]);
+  try {
+    const memberships = await query(
+      "SELECT LOWER(mp.plan_code) AS plan_code " +
+      "FROM user_memberships um INNER JOIN membership_plans mp ON mp.plan_id = um.plan_id " +
+      "WHERE um.user_id = ? AND um.status = 'ACTIVE' AND um.starts_at <= NOW() " +
+      "AND um.expires_at > NOW() AND mp.is_active = 1 ORDER BY um.expires_at DESC LIMIT 1",
+      [session.id]
+    );
+    if (memberships.length) user.membership = memberships[0].plan_code;
+  } catch (error) {
+    // Authentication must remain available while an optional membership read is unavailable.
+    console.error('Unable to resolve membership status:', error?.message || error);
+  }
+  return user;
 }
 
 export function toPublicUser(row) {

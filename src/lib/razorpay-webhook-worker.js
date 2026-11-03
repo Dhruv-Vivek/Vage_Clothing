@@ -6,6 +6,10 @@ import {
   markGatewayPaymentCaptured,
   markRazorpayPaymentAuthorized,
 } from '@/lib/order-payments';
+import {
+  markMembershipPurchaseCaptured,
+  markMembershipPurchaseAuthorized,
+} from '@/lib/membership';
 
 function parsePayload(value) {
   if (value && typeof value === 'object') return value;
@@ -103,10 +107,17 @@ export async function dispatchPendingRazorpayWebhookEvents(limit = 10) {
          LIMIT 1`,
         [paymentEntity.order_id]
       );
+      const [membershipPayments] = await pool.execute(
+        `SELECT membership_payment_id
+         FROM membership_payment_transactions
+         WHERE gateway_order_id = ? AND gateway = 'RAZORPAY'
+         LIMIT 1`,
+        [paymentEntity.order_id]
+      );
 
-      if (!knownOrders.length) {
+      if (!knownOrders.length && !membershipPayments.length) {
         await setEventStatus(pool, row.razorpay_webhook_event_id, 'PROCESSED');
-        results.push({ providerEventId: row.provider_event_id, status: 'IGNORED', reason: 'Not a VAGE Razorpay order' });
+        results.push({ providerEventId: row.provider_event_id, status: 'IGNORED', reason: 'Not a VAGE order or membership payment' });
         continue;
       }
 
@@ -117,22 +128,41 @@ export async function dispatchPendingRazorpayWebhookEvents(limit = 10) {
         throw new Error('Fetched payment does not match the webhook order.');
       }
 
-      if (livePayment.status === 'captured' && livePayment.captured === true) {
-        await markGatewayPaymentCaptured({
-          gateway: 'RAZORPAY',
-          gatewayOrderId: livePayment.order_id,
-          gatewayPaymentId: livePayment.id,
-          amount: livePayment.amount,
-          currency: livePayment.currency,
-          signatureVerified: true,
-          queueEmails: true,
-          dispatchEmails: false,
-        });
-      } else if (livePayment.status === 'authorized') {
-        await markRazorpayPaymentAuthorized({
-          gatewayOrderId: livePayment.order_id,
-          gatewayPaymentId: livePayment.id,
-        });
+      if (knownOrders.length) {
+        if (livePayment.status === 'captured' && livePayment.captured === true) {
+          await markGatewayPaymentCaptured({
+            gateway: 'RAZORPAY',
+            gatewayOrderId: livePayment.order_id,
+            gatewayPaymentId: livePayment.id,
+            amount: livePayment.amount,
+            currency: livePayment.currency,
+            signatureVerified: true,
+            queueEmails: true,
+            dispatchEmails: false,
+          });
+        } else if (livePayment.status === 'authorized') {
+          await markRazorpayPaymentAuthorized({
+            gatewayOrderId: livePayment.order_id,
+            gatewayPaymentId: livePayment.id,
+          });
+        }
+      } else {
+        const membershipPaymentId = Number(membershipPayments[0].membership_payment_id);
+        if (livePayment.status === 'captured' && livePayment.captured === true) {
+          await markMembershipPurchaseCaptured({
+            purchaseId: membershipPaymentId,
+            gatewayOrderId: livePayment.order_id,
+            gatewayPaymentId: livePayment.id,
+            amount: livePayment.amount,
+            currency: livePayment.currency,
+            signatureVerified: true,
+          });
+        } else if (livePayment.status === 'authorized') {
+          await markMembershipPurchaseAuthorized({
+            purchaseId: membershipPaymentId,
+            gatewayPaymentId: livePayment.id,
+          });
+        }
       }
       // A failed payment attempt is not immediately final: Checkout can permit
       // another attempt in the same modal. Dismissal/reconciliation owns release.
