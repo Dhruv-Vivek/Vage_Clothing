@@ -13,10 +13,23 @@ function requiredEnv(name) {
   return value;
 }
 
+function getRazorpayKeyId() {
+  const keyId = requiredEnv('RAZORPAY_KEY_ID');
+
+  if (!/^rzp_(test|live)_/i.test(keyId)) {
+    throw new Error('RAZORPAY_KEY_ID must be a valid Test Mode or Live Mode Razorpay Key ID.');
+  }
+  if (process.env.NODE_ENV !== 'production' && keyId.startsWith('rzp_live_')) {
+    throw new Error('Live Razorpay credentials are blocked in local development. Use Test Mode keys beginning with rzp_test_.');
+  }
+
+  return keyId;
+}
+
 export function getRazorpay() {
   if (!razorpayClient) {
     razorpayClient = new Razorpay({
-      key_id: requiredEnv('RAZORPAY_KEY_ID'),
+      key_id: getRazorpayKeyId(),
       key_secret: requiredEnv('RAZORPAY_KEY_SECRET'),
     });
   }
@@ -59,5 +72,5 @@ export function verifyWebhookSignature(rawBody, signature) {
 }
 
 export function getRazorpayPublicKey() {
-  return requiredEnv('RAZORPAY_KEY_ID');
+  return getRazorpayKeyId();
 }
