@@ -35,8 +35,8 @@ async function cartRequest(url, { method = 'GET', body } = {}) {
 }
 
 /**
- * The cart now lives in MySQL (carts / cart_items) for the signed-in customer, so the order can be
- * built from it by the place_order procedure. Favourites remain a browser-only convenience.
+ * Signed-in carts and wishlists are stored in MySQL. Guest favorites stay in localStorage
+ * and are merged into the customer's account when they sign in.
  * Every cart action resolves to { ok, error? } so pages can show a message instead of crashing.
  */
 export function CartProvider({ children }) {
@@ -76,21 +76,42 @@ export function CartProvider({ children }) {
       const guestFavorites = readStoredFavorites();
       try {
         let payload = await cartRequest('/api/account/wishlist');
+        let guestFavoritesMerged = guestFavorites.length === 0;
+
         if (guestFavorites.length > 0) {
           const productIds = [...new Set(guestFavorites.map((product) => Number(product.id)))];
-          await cartRequest('/api/account/wishlist', {
-            method: 'POST',
-            body: { productIds },
-          });
-          payload = await cartRequest('/api/account/wishlist');
+          try {
+            await cartRequest('/api/account/wishlist', {
+              method: 'POST',
+              body: { productIds },
+            });
+            guestFavoritesMerged = true;
+            try {
+              payload = await cartRequest('/api/account/wishlist');
+            } catch (refreshError) {
+              console.error('Wishlist was saved, but the refreshed list could not be loaded:', refreshError);
+              const existing = Array.isArray(payload.products) ? payload.products : [];
+              const existingIds = new Set(existing.map((product) => Number(product.id)));
+              payload = {
+                products: [
+                  ...existing,
+                  ...guestFavorites.filter((product) => !existingIds.has(Number(product.id))),
+                ],
+              };
+            }
+          } catch (mergeError) {
+            console.error('Unable to merge guest favorites into the account wishlist:', mergeError);
+          }
         }
 
         if (cancelled) return;
         setFavorites(Array.isArray(payload.products) ? payload.products : []);
-        try {
-          localStorage.removeItem('favorites');
-        } catch {
-          /* storage unavailable */
+        if (guestFavoritesMerged) {
+          try {
+            localStorage.removeItem('favorites');
+          } catch {
+            /* storage unavailable */
+          }
         }
       } catch (error) {
         console.error('Unable to load the account wishlist:', error);
