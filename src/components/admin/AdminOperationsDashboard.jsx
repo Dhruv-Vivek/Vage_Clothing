@@ -78,7 +78,7 @@ export default function AdminOperationsDashboard() {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Metric label="Paid revenue" value={loading ? '—' : inr(stats.totalRevenue || 0)} detail="Excludes cancelled and returned orders" icon={IndianRupee} />
         <Metric label="Total orders" value={loading ? '—' : Number(stats.totalOrders || 0)} detail={`${Number(stats.paidOrders || 0)} orders paid`} icon={ShoppingBag} />
-        <Metric label="To fulfil" value={loading ? '—' : Number(stats.ordersToFulfil || 0)} detail="Orders from pending to shipped" icon={PackageCheck} />
+        <Metric label="Open orders" value={loading ? '—' : Number(stats.ordersToFulfil || 0)} detail="Pending, confirmation or fulfilment" icon={PackageCheck} />
         <Metric label="Active customers" value={loading ? '—' : Number(stats.totalCustomers || 0)} detail="Active customer accounts" icon={Users} />
         <Metric label="Low-stock variants" value={loading ? '—' : Number(stats.lowStockVariants || 0)} detail="Five units or fewer" icon={AlertTriangle} />
         <Metric label="Support follow-up" value={loading ? '—' : Number(stats.unresolvedMessages || 0)} detail="Contact emails not fully delivered" icon={Mail} />
