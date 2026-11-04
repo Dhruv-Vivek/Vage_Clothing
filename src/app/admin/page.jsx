@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BarChart3, Mail } from 'lucide-react';
 import { query } from '@/lib/db';
 import { LOW_STOCK_THRESHOLD, requireAdminPage } from '@/lib/admin';
 import { inr } from '@/lib/format';
@@ -66,6 +67,21 @@ export default async function AdminOverviewPage() {
           </div>
         ))}
       </dl>
+
+      <section className="mb-10" aria-labelledby="operations-heading">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="operations-heading" className="text-lg font-semibold">Operations</h2>
+            <p className="text-sm text-light-gray">Review payment performance and customer support.</p>
+          </div>
+          <Link href="/admin/messages" className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-3 py-2 text-sm text-white hover:border-white">
+            <Mail className="h-4 w-4" /> Contact inbox
+          </Link>
+        </div>
+        <p className="rounded-xl border border-dark-border px-5 py-4 text-sm text-light-gray">
+          The detailed revenue trend and order pipeline are available in the admin analytics dashboard section below.
+        </p>
+      </section>
 
       <section aria-labelledby="restock-heading">
         <div className="mb-3 flex items-end justify-between">
