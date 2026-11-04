@@ -24,7 +24,7 @@ export default function OrdersManager() {
 
   const load = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ status, payment, page: String(page) });
+      const params = new URLSearchParams({ status, paymentStatus: payment, page: String(page), pageSize: '20' });
       if (q) params.set('q', q);
       setData(await api(`/api/admin/orders?${params}`));
       setError('');
