@@ -24,9 +24,22 @@ Public sign-up continues to create CUSTOMER accounts. To promote an existing acc
 
 The script changes only the role of an existing active account. It does not create users, change passwords or expose role selection in public registration. Do not run it with a guessed or unowned email address.
 
-## PR #11 COD checkout database fields
+## PR #11 checkout database migrations
 
-Before testing the COD checkout against MySQL, inspect and apply the additive migration `database/vage-pr11-cod-checkout-compat-migration.sql`. It ensures the order columns used by the current checkout, online checkout and lifecycle email queries exist: `contact_email`, `coupon_discount_amount`, `membership_discount_amount` and `delivery_method`. It is safe to re-run. The COD route itself creates the order with a locked transaction and does not call the missing `place_order` stored procedure.
+Before testing checkout against MySQL, inspect these objects and apply only the missing additive migrations:
+
+1. `database/vage-pr11-cod-checkout-compat-migration.sql` ensures the order columns used by the COD/online checkout and lifecycle email queries exist: `contact_email`, `coupon_discount_amount`, `membership_discount_amount` and `delivery_method`.
+2. `database/vage-order-payment-gateway-migration.sql` creates `order_payment_gateways` if it is absent. This is used by Razorpay, Cashfree and Demo payment verification, reconciliation, refunds and webhook processing. On a fresh database, run it after `vage-batch6-payments-migration.sql` and before `vage-batch6.1-cashfree-demo-migration.sql`. Existing databases can run it standalone if the table is missing.
+
+Both migrations are additive and safe to re-run. Inspect first:
+
+```sql
+USE vage_clothing;
+SHOW COLUMNS FROM orders;
+SHOW TABLES LIKE 'order_payment_gateways';
+```
+
+The COD route creates the order with a locked MySQL transaction and does not call the missing `place_order` stored procedure. COD cash collection is recorded transactionally and does not depend on the missing `confirm_payment` stored procedure.
 
 ## Contact inbox database requirement
 
@@ -65,7 +78,7 @@ Admin API routes use the current signed-session, active-account and ADMIN-role c
 
 ## Local verification
 
-After pulling the integration branch, inspect and run the additive checkout migration above if those columns are not already present, then install dependencies and run:
+After pulling the integration branch, inspect and run the missing checkout/gateway migrations described above, then install dependencies and run:
 
 ```powershell
 npm ci
