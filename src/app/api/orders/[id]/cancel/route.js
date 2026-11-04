@@ -1,26 +1,28 @@
 import { userRoute } from '@/lib/api';
-import { cancelOrderInTx, loadOrderDetail, lockOrder } from '@/lib/orders';
-import { CUSTOMER_CANCELLABLE } from '@/lib/order-status';
-import { HttpError, toId, withTransaction } from '@/lib/validate';
+import { cancelOrder } from '@/lib/order-lifecycle';
+import { loadOrderDetail } from '@/lib/orders';
+import { HttpError, toId } from '@/lib/validate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * Use the central order lifecycle service so paid Razorpay orders are refunded
+ * idempotently, demo refunds are labelled as simulated, and unsupported
+ * providers are never falsely marked as refunded.
+ */
 export const POST = userRoute(async ({ params, user }) => {
   const orderId = toId(params.id, 'Order');
-
-  await withTransaction(async (connection) => {
-    const order = await lockOrder(connection, orderId, user.id);
-    if (!CUSTOMER_CANCELLABLE.includes(order.status)) {
-      throw new HttpError(409, 'This order has already moved on and can no longer be cancelled here. Please contact us.');
-    }
-    if (order.payment_status === 'PAID') {
-      throw new HttpError(409, 'This order is already paid. Please contact us to cancel and arrange a refund.');
-    }
-    await cancelOrderInTx(connection, order, { actorId: user.id, note: 'Cancelled by customer' });
-  });
-
+  const cancellation = await cancelOrder({ orderId, userId: user.id, actor: user });
   const detail = await loadOrderDetail(orderId, { userId: user.id });
+  if (!detail) throw new HttpError(404, 'Order not found.');
   detail.canCancel = false;
+  detail.cancellation = {
+    status: cancellation.status,
+    refunded: Boolean(cancellation.refunded),
+    refundId: cancellation.refundId || null,
+    simulatedRefund: Boolean(cancellation.simulatedRefund),
+    alreadyFinal: Boolean(cancellation.alreadyFinal),
+  };
   return detail;
 });
