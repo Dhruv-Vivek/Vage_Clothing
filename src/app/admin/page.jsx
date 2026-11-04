@@ -83,6 +83,21 @@ export default async function AdminOverviewPage() {
         </p>
       </section>
 
+      <section aria-labelledby="intelligence-heading" className="mb-10">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <h2 id="intelligence-heading" className="text-lg font-semibold">Store intelligence</h2>
+            <p className="text-sm text-light-gray">Customer behaviour insights and support operations.</p>
+          </div>
+          <Link href="/admin/product-intelligence" className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-3 py-2 text-sm text-white hover:border-white">
+            <TrendingUp className="h-4 w-4" /> Product intelligence
+          </Link>
+        </div>
+        <Link href="/admin/messages" className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-3 py-2 text-sm text-white hover:border-white">
+          <Mail className="h-4 w-4" /> Contact inbox
+        </Link>
+      </section>
+
       <section aria-labelledby="restock-heading">
         <div className="mb-3 flex items-end justify-between">
           <div>
