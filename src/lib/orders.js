@@ -100,7 +100,14 @@ export async function loadOrderDetail(orderId, { userId = null, admin = false } 
         WHERE oi.order_id = ? ORDER BY oi.order_item_id`,
       [orderId]
     ),
-    query('SELECT * FROM payments WHERE order_id = ? ORDER BY payment_id', [orderId]),
+    query(
+      `SELECT p.*, g.gateway, g.gateway_order_id, g.gateway_payment_id
+         FROM payments p
+         LEFT JOIN order_payment_gateways g ON g.payment_id = p.payment_id
+        WHERE p.order_id = ?
+        ORDER BY p.payment_id`,
+      [orderId]
+    ),
     query(
       `SELECT h.*, u.full_name AS changed_by_name
          FROM order_status_history AS h
@@ -153,8 +160,9 @@ export async function loadOrderDetail(orderId, { userId = null, admin = false } 
       method: p.payment_method,
       status: p.status,
       amount: Number(p.amount),
-      transactionRef: p.transaction_ref || null,
+      transactionRef: p.transaction_ref || p.gateway_payment_id || null,
       paidAt: p.paid_at,
+      gateway: p.gateway || null,
     })),
     history: history.map((h) => ({
       id: Number(h.history_id),

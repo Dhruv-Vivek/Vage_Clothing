@@ -162,10 +162,11 @@ export async function cancelOrder({ orderId, userId = null, actor }) {
       await connection.commit();
       return { orderId, status: 'CANCELLED', alreadyFinal: true };
     }
-    if (order.status === 'PENDING') {
-      throw new HttpError(409, 'The payment session is still active. Close checkout so payment reconciliation can safely confirm the payment or release the reserved stock.');
+    const isCashOnDelivery = String(order.payment_method || '').toUpperCase() === 'COD';
+    if (order.status === 'PENDING' && (!isCashOnDelivery || order.payment_status === 'PAID')) {
+      throw new HttpError(409, 'The online payment session is still active. Complete or close checkout before cancelling this order.');
     }
-    if (!['CONFIRMED', 'PROCESSING'].includes(order.status)) {
+    if (!['PENDING', 'CONFIRMED', 'PROCESSING'].includes(order.status)) {
       throw new HttpError(409, 'This order can no longer be cancelled online.');
     }
 
@@ -235,6 +236,7 @@ export async function cancelOrder({ orderId, userId = null, actor }) {
 }
 
 const ADMIN_TRANSITIONS = {
+  PENDING: ['CONFIRMED'],
   CONFIRMED: ['PROCESSING'],
   PROCESSING: ['SHIPPED'],
   SHIPPED: ['DELIVERED'],
@@ -251,7 +253,10 @@ export async function adminAdvanceOrder({ orderId, nextStatus, note, actor }) {
     if (!(ADMIN_TRANSITIONS[order.status] || []).includes(nextStatus)) {
       throw new HttpError(409, `An order that is ${order.status} cannot be moved to ${nextStatus}.`);
     }
-    if (order.payment_status !== 'PAID') throw new HttpError(409, 'Only paid orders can be fulfilled.');
+    const isCashOnDelivery = String(order.payment_method || '').toUpperCase() === 'COD';
+    if (order.payment_status !== 'PAID' && !isCashOnDelivery) {
+      throw new HttpError(409, 'Online orders must be paid before fulfilment. COD orders can move through fulfilment before payment is collected.');
+    }
     await connection.execute('UPDATE orders SET status = ? WHERE order_id = ?', [nextStatus, orderId]);
     await noteLastStatusChange(connection, orderId, actor?.id, note || `Order moved to ${nextStatus}`);
     if (nextStatus === 'SHIPPED' || nextStatus === 'DELIVERED') {

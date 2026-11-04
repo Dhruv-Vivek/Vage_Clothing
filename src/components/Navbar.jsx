@@ -107,7 +107,7 @@ function Navbar() {
             {/* Login/User Button - Corrected placement and logic */}
             {isLoading ? null : isLoggedIn ? (
               <div className="hidden md:flex items-center gap-4">
-                <Link href="/orders" className="text-sm text-light-gray hover:text-white transition-colors">
+                <Link href="/account/orders" className="text-sm text-light-gray hover:text-white transition-colors">
                   My orders
                 </Link>
                 {user.role === 'ADMIN' && (
@@ -118,10 +118,10 @@ function Navbar() {
                     Admin
                   </Link>
                 )}
-                <div className="flex items-center gap-2 text-white">
+                <Link href="/account" className="flex items-center gap-2 text-white transition-colors hover:text-lighter-gray" aria-label="Open my account">
                   <User className="w-5 h-5" />
-                  <span className="text-sm font-medium">{user.name}</span>
-                </div>
+                  <span className="text-sm font-medium">My Account</span>
+                </Link>
                 <button
                   onClick={() => {
                     logout();
@@ -134,13 +134,19 @@ function Navbar() {
                 </button>
               </div>
             ) : (
-              // Login Button (Desktop)
+              <>
+              <Link href="/account" className="hidden md:flex items-center gap-2 text-light-gray hover:text-white transition-colors">
+                <User className="w-5 h-5" />
+                <span className="text-sm font-medium">Account</span>
+              </Link>
+              {/* Login Button (Desktop) */}
               <button
                 onClick={() => setLoginModalOpen(true)}
                 className="hidden md:flex items-center space-x-2 bg-white text-black px-6 py-2 rounded-lg hover:bg-lighter-gray transition-all duration-300"
               >
                 <span className="text-sm font-medium">Login</span>
               </button>
+              </>
             )}
 
             {/* Wishlist */}
@@ -204,6 +210,13 @@ function Navbar() {
                   {link.name}
                 </Link>
               ))}
+              <Link
+                href="/account"
+                className="block text-light-gray hover:text-white transition-colors py-2"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                My Account
+              </Link>
               {/* Mobile Login Button */}
               {!isLoggedIn && (
                 <button 
@@ -218,7 +231,7 @@ function Navbar() {
               )}
               {isLoggedIn && (
                 <Link
-                  href="/orders"
+                  href="/account/orders"
                   className="block text-light-gray hover:text-white transition-colors py-2"
                   onClick={() => setMobileMenuOpen(false)}
                 >

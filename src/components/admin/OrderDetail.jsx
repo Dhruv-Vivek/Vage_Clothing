@@ -60,7 +60,10 @@ export default function OrderDetail({ orderId }) {
 
   const { order, customer, address, items, payments, history, nextStatuses } = detail;
   const payment = payments[payments.length - 1];
-  const canMarkPaid = order.paymentStatus === 'PENDING' && !['CANCELLED', 'RETURNED'].includes(order.status);
+  const canMarkPaid =
+    payment?.method === 'COD' &&
+    order.paymentStatus === 'PENDING' &&
+    order.status === 'DELIVERED';
 
   return (
     <>
@@ -86,7 +89,7 @@ export default function OrderDetail({ orderId }) {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             maxLength={400}
-            placeholder="Optional note (shown to the customer in the order progress, or used as the payment reference)"
+            placeholder={canMarkPaid ? "Optional COD cash collection reference" : "Optional note for the order history"}
             aria-label="Note"
           />
           <div className="flex flex-wrap gap-2">
