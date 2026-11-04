@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { query } from '@/lib/db';
 import { LOW_STOCK_THRESHOLD, requireAdminPage } from '@/lib/admin';
 import { inr } from '@/lib/format';
+import AdminOperationsDashboard from '@/components/admin/AdminOperationsDashboard';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,6 +105,8 @@ export default async function AdminOverviewPage() {
           </ul>
         )}
       </section>
+
+      <AdminOperationsDashboard />
     </>
   );
 }
