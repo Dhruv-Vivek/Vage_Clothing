@@ -167,8 +167,10 @@ def main() -> int:
     run_id = str(uuid.uuid4())
     collection = client[database]["product_events"]
 
+    connected = False
     try:
         client.admin.command("ping")
+        connected = True
         print("MongoDB ping: OK")
         print("Database:", database)
         ensure_indexes(collection)
@@ -218,9 +220,15 @@ def main() -> int:
         print(str(error))
         return 1
     finally:
-        deleted = collection.delete_many({"testRunId": run_id}).deleted_count
+        if connected:
+            try:
+                deleted = collection.delete_many({"testRunId": run_id}).deleted_count
+                print("Temporary test records cleaned up:", deleted)
+            except PyMongoError as cleanup_error:
+                print("WARNING: MongoDB cleanup could not be confirmed:", cleanup_error)
+        else:
+            print("MongoDB was never reached; no test records were inserted.")
         client.close()
-        print("Temporary test records cleaned up:", deleted)
 
 
 if __name__ == "__main__":
