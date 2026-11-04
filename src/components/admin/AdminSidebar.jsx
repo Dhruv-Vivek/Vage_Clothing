@@ -11,10 +11,11 @@ const NAV = [
   { href: '/admin/inventory', label: 'Inventory', icon: Boxes },
   { href: '/admin/orders', label: 'Orders & returns', icon: ShoppingBag },
   { href: '/admin/product-intelligence', label: 'Product intelligence', icon: TrendingUp },
+  { href: '/admin/messages', label: 'Messages', icon: Mail },
 ];
 const COMING = [
   { label: 'Customers', icon: Users },
-  { label: 'Messages', icon: Mail },
+  { label: 'Customers', icon: Users },
 ];
 
 export default function AdminSidebar({ name }) {
