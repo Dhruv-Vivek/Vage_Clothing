@@ -1,94 +1,16 @@
-import { NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
-import { query } from '@/lib/db';
+import { userRoute } from '@/lib/api';
+import { loadOrderDetail } from '@/lib/orders';
+import { CUSTOMER_CANCELLABLE } from '@/lib/order-status';
+import { HttpError, toId } from '@/lib/validate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request, context) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: 'Please sign in.' }, { status: 401 });
-
-  const rawId = (await context.params).id;
-  if (!/^\d+$/.test(String(rawId))) {
-    return NextResponse.json({ error: 'Invalid order ID.' }, { status: 400 });
-  }
-  const orderId = Number(rawId);
-  if (!Number.isSafeInteger(orderId) || orderId <= 0) {
-    return NextResponse.json({ error: 'Invalid order ID.' }, { status: 400 });
-  }
-
-  try {
-    const orders = await query(
-      `SELECT
-          o.order_id, o.order_number, o.status, o.payment_status,
-          o.subtotal, o.discount_amount, o.coupon_discount_amount,
-          o.membership_discount_amount, o.shipping_amount,
-          o.delivery_method, o.total_amount, o.created_at, o.contact_email,
-          a.recipient_name, a.phone, a.address_line1, a.address_line2,
-          a.city, a.state_name, a.postal_code, a.country,
-          p.transaction_ref, p.paid_at, p.payment_method, g.gateway AS payment_provider, g.gateway_order_id, g.gateway_payment_id
-       FROM orders o
-       LEFT JOIN addresses a ON a.address_id = o.address_id
-       LEFT JOIN payments p ON p.order_id = o.order_id
-       LEFT JOIN order_payment_gateways g ON g.payment_id = p.payment_id
-       WHERE o.order_id = ? AND o.user_id = ?
-       ORDER BY p.paid_at DESC
-       LIMIT 1`,
-      [orderId, user.id]
-    );
-
-    if (!orders.length) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
-
-    const items = await query(
-      `SELECT oi.order_item_id, oi.product_name, oi.sku, oi.size, oi.color,
-              oi.unit_price, oi.quantity, oi.line_total,
-              COALESCE((SELECT SUM(r.quantity) FROM returns r
-                         WHERE r.order_item_id = oi.order_item_id AND r.status <> 'REJECTED'), 0) AS return_requested_quantity
-         FROM order_items oi
-        WHERE oi.order_id = ?
-        ORDER BY oi.order_item_id`,
-      [orderId]
-    );
-
-    const returns = await query(
-      `SELECT r.return_id, r.order_item_id, r.quantity, r.reason, r.status,
-              r.resolution_notes, r.refund_amount, r.refund_reference,
-              r.requested_at, r.updated_at
-         FROM returns r INNER JOIN order_items oi ON oi.order_item_id = r.order_item_id
-        WHERE oi.order_id = ? ORDER BY r.requested_at DESC, r.return_id DESC`,
-      [orderId]
-    );
-    const returnWindowRows = await query(
-      `SELECT (NOW() <= DATE_ADD(MAX(changed_at), INTERVAL ? DAY)) AS return_window_open
-         FROM order_status_history WHERE order_id = ? AND new_status = 'DELIVERED'`,
-      [Math.max(1, Math.min(30, Number.parseInt(process.env.RETURN_WINDOW_DAYS || '7', 10) || 7)), orderId]
-    );
-
-    const emailDelivery = await query(
-      `SELECT event_type, status, provider_message_id, last_error, sent_at
-       FROM email_outbox
-       WHERE dedupe_key IN (?, ?)
-       ORDER BY email_outbox_id`,
-      [`order-confirmation/${orderId}`, `payment-receipt/${orderId}`]
-    );
-
-    const statusHistory = await query(
-      `SELECT history_id, old_status, new_status, note, changed_at
-       FROM order_status_history
-       WHERE order_id = ?
-       ORDER BY changed_at ASC, history_id ASC`,
-      [orderId]
-    );
-
-    return NextResponse.json(
-      { order: orders[0], items, emailDelivery, statusHistory, returns,
-        returnWindowOpen: Boolean(returnWindowRows[0]?.return_window_open),
-        canCancel: ['CONFIRMED', 'PROCESSING'].includes(orders[0].status) },
-      { headers: { 'Cache-Control': 'no-store, max-age=0' } }
-    );
-  } catch (error) {
-    console.error('[GET /api/orders/:id] Failed:', error);
-    return NextResponse.json({ error: 'Unable to load this order.' }, { status: 500 });
-  }
-}
+/** One order, only if it belongs to the signed-in customer (someone else's order looks like "not found"). */
+export const GET = userRoute(async ({ params, user }) => {
+  const detail = await loadOrderDetail(toId(params.id, 'Order'), { userId: user.id });
+  if (!detail) throw new HttpError(404, 'Order not found.');
+  detail.canCancel =
+    CUSTOMER_CANCELLABLE.includes(detail.order.status) && detail.order.paymentStatus !== 'PAID';
+  return detail;
+});
