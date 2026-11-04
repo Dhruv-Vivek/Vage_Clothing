@@ -1,140 +1,87 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { BarChart3, Mail } from 'lucide-react';
-import { query } from '@/lib/db';
-import { LOW_STOCK_THRESHOLD, requireAdminPage } from '@/lib/admin';
-import { inr } from '@/lib/format';
+import {
+  IndianRupee, ShoppingBag, PackageCheck, Users, AlertTriangle, Mail,
+  RefreshCw, TrendingUp, ArrowUpRight,
+} from 'lucide-react';
 
-export const dynamic = 'force-dynamic';
-
-const T = LOW_STOCK_THRESHOLD;
-
-async function loadOverview() {
-  const [products] = await query(
-    `SELECT COALESCE(SUM(status = 'ACTIVE'), 0) AS active, COALESCE(SUM(status = 'DRAFT'), 0) AS drafts FROM products`
-  );
-  const [stock] = await query(
-    `SELECT COALESCE(SUM(s.stock = 0), 0) AS out_of_stock,
-            COALESCE(SUM(s.stock BETWEEN 1 AND ${T}), 0) AS low_stock
-       FROM (SELECT COALESCE(i.stock_quantity, 0) AS stock
-               FROM product_variants AS pv
-               JOIN products AS p ON p.product_id = pv.product_id
-               LEFT JOIN inventory AS i ON i.variant_id = pv.variant_id
-              WHERE pv.is_active = 1 AND p.status = 'ACTIVE') AS s`
-  );
-  const [orders] = await query(
-    `SELECT COUNT(*) AS total,
-            COALESCE(SUM(status IN ('PENDING', 'CONFIRMED', 'PROCESSING')), 0) AS open_orders,
-            COALESCE(SUM(CASE WHEN payment_status = 'PAID' THEN total_amount END), 0) AS revenue
-       FROM orders`
-  );
-  const [customers] = await query(`SELECT COUNT(*) AS n FROM users WHERE role = 'CUSTOMER'`);
-  const restock = await query(
-    `SELECT p.name, pv.size, pv.color, pv.sku, COALESCE(i.stock_quantity, 0) AS stock
-       FROM product_variants AS pv
-       JOIN products AS p ON p.product_id = pv.product_id
-       LEFT JOIN inventory AS i ON i.variant_id = pv.variant_id
-      WHERE pv.is_active = 1 AND p.status = 'ACTIVE' AND COALESCE(i.stock_quantity, 0) <= ${T}
-      ORDER BY stock ASC, p.name ASC
-      LIMIT 8`
-  );
-  return { products, stock, orders, customers: Number(customers.n), restock };
+function money(value) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Number(value || 0));
+}
+function Status({ value }) {
+  const tone = {
+    PAID: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300',
+    DELIVERED: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300',
+    FAILED: 'border-red-400/25 bg-red-400/10 text-red-300',
+    CANCELLED: 'border-red-400/25 bg-red-400/10 text-red-300',
+    PENDING: 'border-amber-300/25 bg-amber-300/10 text-amber-200',
+    CONFIRMED: 'border-sky-300/25 bg-sky-300/10 text-sky-200',
+    PROCESSING: 'border-sky-300/25 bg-sky-300/10 text-sky-200',
+    SHIPPED: 'border-violet-300/25 bg-violet-300/10 text-violet-200',
+  };
+  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-medium tracking-wide ${tone[value] || 'border-white/15 bg-white/5 text-white/60'}`}>{String(value || 'UNKNOWN').replaceAll('_', ' ')}</span>;
+}
+function Metric({ label, value, detail, icon: Icon, accent }) {
+  return <div className="rounded-2xl border border-dark-border bg-dark-secondary p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-[0.16em] text-light-gray">{label}</p><p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p><p className="mt-2 text-xs text-light-gray">{detail}</p></div><div className={`rounded-xl border border-dark-border p-3 ${accent || 'text-white'}`}><Icon className="h-5 w-5"/></div></div></div>;
 }
 
-export default async function AdminOverviewPage() {
-  const admin = await requireAdminPage();
-  const { products, stock, orders, customers, restock } = await loadOverview();
-
-  const stats = [
-    { label: 'Paid revenue', value: inr(orders.revenue), note: `${Number(orders.total)} order${Number(orders.total) === 1 ? '' : 's'} in total` },
-    { label: 'Open orders', value: Number(orders.open_orders), note: 'Pending, confirmed or processing' },
-    { label: 'Customers', value: customers, note: 'Registered accounts' },
-    { label: 'Active products', value: Number(products.active), note: `${Number(products.drafts)} draft${Number(products.drafts) === 1 ? '' : 's'}` },
-  ];
-
+export default function AdminDashboard() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const response = await fetch('/api/admin/dashboard', { credentials: 'same-origin', cache: 'no-store' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Unable to load dashboard.');
+      setData(result);
+    } catch (err) { setError(err.message || 'Unable to load dashboard.'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const maxRevenue = useMemo(() => Math.max(1, ...(data?.monthlyRevenue || []).map((v) => Number(v.revenue || 0))), [data]);
   return (
-    <>
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Welcome back, {admin.name.split(' ')[0]}</h1>
-        <p className="mt-1 text-sm text-light-gray">Here is where the store stands right now.</p>
+    <div>
+      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div><p className="text-xs uppercase tracking-[0.2em] text-light-gray">Store operations</p><h1 className="mt-2 text-3xl font-semibold">Store overview</h1><p className="mt-2 text-sm text-light-gray">Live orders, revenue, fulfilment and support metrics.</p></div>
+        <button onClick={load} disabled={loading} className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-3 py-2 text-sm text-white hover:border-white disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/> Refresh</button>
       </header>
-
-      <dl className="mb-10 grid grid-cols-2 divide-x divide-y divide-dark-border overflow-hidden rounded-xl border border-dark-border lg:grid-cols-4 lg:divide-y-0">
-        {stats.map((s) => (
-          <div key={s.label} className="px-5 py-4">
-            <dt className="text-sm text-light-gray">{s.label}</dt>
-            <dd className="mt-1 text-3xl font-semibold tracking-tight">{s.value}</dd>
-            <dd className="mt-1 text-xs text-light-gray">{s.note}</dd>
+      {error && <p role="alert" className="mb-5 rounded-lg border border-red-500/40 p-4 text-sm text-red-300">{error}</p>}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Paid revenue" value={loading ? '—' : money(data?.stats.totalRevenue)} detail="Successful payments" icon={IndianRupee}/>
+        <Metric label="Total orders" value={loading ? '—' : data?.stats.totalOrders ?? 0} detail={`${data?.stats.paidOrders || 0} paid orders`} icon={ShoppingBag}/>
+        <Metric label="To fulfil" value={loading ? '—' : data?.stats.ordersToFulfil ?? 0} detail="Paid, confirmed or processing" icon={PackageCheck}/>
+        <Metric label="Customers" value={loading ? '—' : data?.stats.totalCustomers ?? 0} detail="Active customer accounts" icon={Users}/>
+        <Metric label="Low-stock variants" value={loading ? '—' : data?.stats.lowStockVariants ?? 0} detail="Five units or fewer" icon={AlertTriangle}/>
+        <Metric label="Support follow-up" value={loading ? '—' : data?.stats.unresolvedMessages ?? 0} detail="Email delivery needs attention" icon={Mail}/>
+        <Metric label="Paid orders" value={loading ? '—' : data?.stats.paidOrders ?? 0} detail="Payment status verified" icon={TrendingUp}/>
+        <Link href="/admin/orders" className="group flex items-center justify-between rounded-2xl border border-dark-border bg-dark-secondary p-5 transition hover:border-white"><div><p className="text-xs uppercase tracking-[0.16em] text-light-gray">Operations</p><p className="mt-3 text-lg font-semibold">Manage orders</p><p className="mt-1 text-xs text-light-gray">Search and review all orders</p></div><ArrowUpRight className="h-5 w-5 text-light-gray"/></Link>
+      </div>
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="rounded-2xl border border-dark-border bg-dark-secondary p-5 sm:p-6"><div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold">Revenue trend</h2><p className="mt-1 text-xs text-light-gray">Successful payments · last six months</p></div><TrendingUp className="h-5 w-5 text-light-gray"/></div>
+          <div className="mt-8 flex h-52 items-end gap-3">
+            {(data?.monthlyRevenue || []).map((item) => <div key={item.month_start || item.month} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2"><span className="text-[10px] text-light-gray">{money(item.revenue)}</span><div className="flex w-full flex-1 items-end"><div className="w-full rounded-t-md bg-white/75 transition-all" style={{height:`${Math.max(3,(Number(item.revenue||0)/maxRevenue)*100)}%`}}/></div><span className="text-xs text-light-gray">{item.month}</span></div>)}
+            {!loading && (data?.monthlyRevenue || []).length===0 && <p className="m-auto text-sm text-light-gray">No successful payments recorded yet.</p>}
           </div>
-        ))}
-      </dl>
-
-      <section className="mb-10" aria-labelledby="operations-heading">
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 id="operations-heading" className="text-lg font-semibold">Operations</h2>
-            <p className="text-sm text-light-gray">Review payment performance and customer support.</p>
-          </div>
-          <Link href="/admin/messages" className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-3 py-2 text-sm text-white hover:border-white">
-            <Mail className="h-4 w-4" /> Contact inbox
-          </Link>
-        </div>
-        <p className="rounded-xl border border-dark-border px-5 py-4 text-sm text-light-gray">
-          The detailed revenue trend and order pipeline are available in the admin analytics dashboard section below.
-        </p>
+        </section>
+        <section className="rounded-2xl border border-dark-border bg-dark-secondary p-5 sm:p-6"><h2 className="text-lg font-semibold">Order pipeline</h2><p className="mt-1 text-xs text-light-gray">Current order status distribution</p><div className="mt-5 space-y-4">
+          {(data?.orderStatuses || []).map((item) => {const total=Math.max(1,data?.stats.totalOrders||0);const percent=Math.round((item.count/total)*100);return <div key={item.status}><div className="mb-1.5 flex justify-between text-xs"><span className="text-white/65">{item.status}</span><span className="text-light-gray">{item.count}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-white/70" style={{width:percent+'%'}}/></div></div>;})}
+          {!loading && (data?.orderStatuses || []).length===0 && <p className="text-sm text-light-gray">No orders yet.</p>}
+        </div></section>
+      </div>
+      <section className="mt-6 overflow-hidden rounded-xl border border-dark-border bg-dark-secondary"><div className="flex items-center justify-between border-b border-dark-border px-5 py-5"><div><h2 className="text-lg font-semibold">Recent orders</h2><p className="mt-1 text-xs text-light-gray">Latest activity from the store</p></div><Link href="/admin/orders" className="text-xs text-light-gray hover:text-white">View all →</Link></div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="bg-dark text-xs uppercase tracking-wide text-light-gray"><tr><th className="px-5 py-3">Order</th><th className="px-5 py-3">Customer</th><th className="px-5 py-3">Items</th><th className="px-5 py-3">Order status</th><th className="px-5 py-3">Payment</th><th className="px-5 py-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-dark-border">
+          {(data?.recentOrders || []).map((order) => <tr key={order.order_id}><td className="px-5 py-4 font-medium">{order.order_number}</td><td className="px-5 py-4"><p>{order.customer_name}</p><p className="mt-1 text-xs text-light-gray">{order.customer_email}</p></td><td className="px-5 py-4 text-light-gray">{order.item_count}</td><td className="px-5 py-4"><Status value={order.status}/></td><td className="px-5 py-4"><Status value={order.payment_status}/></td><td className="px-5 py-4 text-right font-medium">{money(order.total_amount)}</td></tr>)}
+          {!loading && (data?.recentOrders || []).length===0 && <tr><td colSpan="6" className="px-5 py-10 text-center text-light-gray">No orders yet.</td></tr>}
+        </tbody></table></div>
       </section>
-
-      <section aria-labelledby="intelligence-heading" className="mb-10">
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <h2 id="intelligence-heading" className="text-lg font-semibold">Store intelligence</h2>
-            <p className="text-sm text-light-gray">Customer behaviour insights and support operations.</p>
-          </div>
-          <Link href="/admin/product-intelligence" className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-3 py-2 text-sm text-white hover:border-white">
-            <TrendingUp className="h-4 w-4" /> Product intelligence
-          </Link>
-        </div>
-        <Link href="/admin/messages" className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-3 py-2 text-sm text-white hover:border-white">
-          <Mail className="h-4 w-4" /> Contact inbox
-        </Link>
+      <section className="mt-6 flex flex-wrap gap-3">
+        <Link href="/admin/messages" className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-4 py-3 text-sm hover:border-white"><Mail className="h-4 w-4"/> Contact inbox</Link>
+        <Link href="/admin/product-intelligence" className="inline-flex items-center gap-2 rounded-lg border border-dark-border px-4 py-3 text-sm hover:border-white"><TrendingUp className="h-4 w-4"/> Product intelligence</Link>
       </section>
-
-      <section aria-labelledby="restock-heading">
-        <div className="mb-3 flex items-end justify-between">
-          <div>
-            <h2 id="restock-heading" className="text-lg font-semibold">
-              Needs restocking
-            </h2>
-            <p className="text-sm text-light-gray">
-              {Number(stock.out_of_stock)} out of stock · {Number(stock.low_stock)} running low (≤ {T} left)
-            </p>
-          </div>
-          <Link href="/admin/inventory" className="text-sm text-lighter-gray underline hover:text-white">
-            Open inventory
-          </Link>
-        </div>
-
-        {restock.length === 0 ? (
-          <p className="rounded-xl border border-dark-border px-5 py-8 text-center text-sm text-light-gray">
-            Every active size and colour is above the low-stock level.
-          </p>
-        ) : (
-          <ul className="divide-y divide-dark-border overflow-hidden rounded-xl border border-dark-border">
-            {restock.map((row) => (
-              <li key={row.sku} className="flex items-center justify-between gap-4 px-5 py-3 text-sm">
-                <div className="min-w-0">
-                  <span className="block truncate font-medium">{row.name}</span>
-                  <span className="text-xs text-light-gray">
-                    {row.size} · {row.color} · {row.sku}
-                  </span>
-                </div>
-                <span className={Number(row.stock) === 0 ? 'font-medium text-red-400' : 'font-medium text-amber-400'}>
-                  {Number(row.stock) === 0 ? 'Out of stock' : `${Number(row.stock)} left`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </>
+    </div>
   );
 }
