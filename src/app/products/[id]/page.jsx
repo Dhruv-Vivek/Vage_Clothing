@@ -1,18 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { ShoppingCart, Heart, ArrowLeft, Minus, Plus } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useCart } from '@/context/CartContext';
-
-function formatPrice(value) {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 2,
-  }).format(Number(value || 0));
-}
+import { inr } from '@/lib/format';
 
 function ProductDetail() {
   const { id } = useParams();
@@ -20,9 +14,12 @@ function ProductDetail() {
   const { addToCart, toggleFavorite, isFavorite } = useCart();
   const [product, setProduct] = useState(null);
   const [variants, setVariants] = useState([]);
-  const [selectedVariantId, setSelectedVariantId] = useState('');
+  const [selectedSize, setSelectedSize] = useState('');
+  const [selectedColor, setSelectedColor] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [isAdding, setIsAdding] = useState(false);
   const [isAdded, setIsAdded] = useState(false);
+  const [cartError, setCartError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -39,12 +36,15 @@ function ProductDetail() {
         });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || 'Product not found.');
-        const loadedVariants = body.variants || [];
+        const list = body.variants || [];
         setProduct(body.product);
-        setVariants(loadedVariants);
-        const firstAvailable = loadedVariants.find((variant) => Number(variant.stockQuantity) > 0);
-        setSelectedVariantId(String((firstAvailable || loadedVariants[0])?.variantId || ''));
+        setVariants(list);
         setQuantity(1);
+        // If there is only one size or colour there is nothing to choose, so pick it for the customer.
+        const sizes = [...new Set(list.map((v) => v.size))];
+        const colors = [...new Set(list.map((v) => v.color))];
+        setSelectedSize(sizes.length === 1 ? sizes[0] : '');
+        setSelectedColor(colors.length === 1 ? colors[0] : '');
       } catch (loadError) {
         if (loadError.name !== 'AbortError') setError(loadError.message);
       } finally {
@@ -58,14 +58,9 @@ function ProductDetail() {
 
   useEffect(() => {
     if (!isAdded) return undefined;
-    const timeout = setTimeout(() => setIsAdded(false), 2000);
+    const timeout = setTimeout(() => setIsAdded(false), 2500);
     return () => clearTimeout(timeout);
   }, [isAdded]);
-
-  const selectedVariant = useMemo(
-    () => variants.find((variant) => String(variant.variantId) === String(selectedVariantId)) || null,
-    [variants, selectedVariantId]
-  );
 
   if (loading) {
     return <div className="min-h-screen bg-dark flex items-center justify-center text-light-gray">Loading product…</div>;
@@ -86,13 +81,57 @@ function ProductDetail() {
   }
 
   const isLiked = isFavorite(product.id);
-  const maxStock = Number(selectedVariant?.stockQuantity || 0);
-  const canAddToCart = Boolean(selectedVariant && maxStock > 0);
+  const sizes = [...new Set(variants.map((v) => v.size))];
+  const colors = [...new Set(variants.map((v) => v.color))];
+  const anyInStock = variants.some((v) => v.inStock);
 
-  const handleAddToCart = () => {
-    if (!canAddToCart) return;
-    if (addToCart(product, selectedVariant, quantity)) setIsAdded(true);
+  const selectedVariant = variants.find((v) => v.size === selectedSize && v.color === selectedColor) || null;
+  const maxStock = selectedVariant ? Math.min(selectedVariant.stockQuantity, 10) : 0;
+  const canAddToCart = Boolean(selectedVariant && selectedVariant.inStock);
+
+  // A size/colour button is available if some in-stock variant matches it (and the other choice, once made).
+  const sizeAvailable = (size) =>
+    variants.some((v) => v.size === size && v.inStock && (!selectedColor || v.color === selectedColor));
+  const colorAvailable = (color) =>
+    variants.some((v) => v.color === color && v.inStock && (!selectedSize || v.size === selectedSize));
+
+  const chooseSize = (size) => {
+    setSelectedSize(size);
+    setQuantity(1);
+    setCartError('');
   };
+  const chooseColor = (color) => {
+    setSelectedColor(color);
+    setQuantity(1);
+    setCartError('');
+  };
+
+  const displayPrice = selectedVariant ? inr(selectedVariant.unitPrice, 2) : product.price;
+
+  const handleAddToCart = async () => {
+    setCartError('');
+    if (!selectedVariant) {
+      if (selectedSize && selectedColor) setCartError('That size and colour combination is not available.');
+      else if (!selectedSize && sizes.length > 1) setCartError('Please choose a size.');
+      else setCartError('Please choose a colour.');
+      return;
+    }
+    if (!canAddToCart) return;
+    setIsAdding(true);
+    const result = await addToCart(selectedVariant.variantId, quantity);
+    setIsAdding(false);
+    if (result.ok) setIsAdded(true);
+    else if (!result.needsLogin) setCartError(result.error);
+  };
+
+  const optionButton = (active, available) =>
+    `px-4 py-2 rounded-lg border text-sm transition-colors ${
+      active
+        ? 'bg-white text-black border-white'
+        : available
+          ? 'bg-dark-secondary text-white border-dark-border hover:border-white'
+          : 'bg-dark text-gray-600 border-dark-border line-through cursor-not-allowed'
+    }`;
 
   return (
     <div className="bg-dark">
@@ -130,9 +169,7 @@ function ProductDetail() {
             >
               <p className="text-light-gray text-sm uppercase tracking-wider">{product.category}</p>
               <h1 className="text-4xl md:text-5xl font-bold text-white">{product.name}</h1>
-              <div className="text-4xl font-bold text-white">
-                {formatPrice(selectedVariant?.unitPrice ?? product.basePrice)}
-              </div>
+              <div className="text-4xl font-bold text-white">{displayPrice}</div>
               <p className="text-light-gray text-lg leading-relaxed">
                 {product.description || 'Premium quality product crafted with attention to detail.'}
               </p>
@@ -152,41 +189,61 @@ function ProductDetail() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-4">
-                <p className="text-sm text-light-gray">
-                  {canAddToCart ? `${maxStock} units available for this variant` : 'This variant is currently out of stock'}
-                </p>
-                <p className="text-sm text-light-gray">{variants.length} variants</p>
-              </div>
+              {anyInStock ? (
+                <div className="space-y-5">
+                  <div>
+                    <p className="text-sm text-light-gray mb-2">Size{selectedSize ? `: ${selectedSize}` : ''}</p>
+                    <div className="flex flex-wrap gap-2" role="group" aria-label="Choose a size">
+                      {sizes.map((size) => {
+                        const available = sizeAvailable(size);
+                        return (
+                          <button
+                            key={size}
+                            type="button"
+                            disabled={!available}
+                            aria-pressed={selectedSize === size}
+                            onClick={() => chooseSize(size)}
+                            className={optionButton(selectedSize === size, available)}
+                          >
+                            {size}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-              <div className="space-y-2 py-4 border-b border-dark-border">
-                <label htmlFor="product-variant" className="block text-white font-medium">
-                  Select size and colour
-                </label>
-                <select
-                  id="product-variant"
-                  value={selectedVariantId}
-                  onChange={(event) => {
-                    setSelectedVariantId(event.target.value);
-                    setQuantity(1);
-                    setIsAdded(false);
-                  }}
-                  disabled={variants.length === 0}
-                  className="w-full px-4 py-3 bg-dark-secondary border border-dark-border rounded-lg text-white focus:outline-none focus:border-white disabled:opacity-50"
-                >
-                  {variants.length === 0 && <option value="">No variants available</option>}
-                  {variants.map((variant) => (
-                    <option key={variant.variantId} value={String(variant.variantId)} disabled={Number(variant.stockQuantity) <= 0}>
-                      {variant.size} / {variant.color} — {formatPrice(variant.unitPrice)} ({variant.stockQuantity > 0 ? `${variant.stockQuantity} in stock` : 'Out of stock'})
-                    </option>
-                  ))}
-                </select>
-                {selectedVariant && (
-                  <p className="text-light-gray text-xs">
-                    SKU: {selectedVariant.sku} · Variant ID: {selectedVariant.variantId}
+                  <div>
+                    <p className="text-sm text-light-gray mb-2">Colour{selectedColor ? `: ${selectedColor}` : ''}</p>
+                    <div className="flex flex-wrap gap-2" role="group" aria-label="Choose a colour">
+                      {colors.map((color) => {
+                        const available = colorAvailable(color);
+                        return (
+                          <button
+                            key={color}
+                            type="button"
+                            disabled={!available}
+                            aria-pressed={selectedColor === color}
+                            onClick={() => chooseColor(color)}
+                            className={optionButton(selectedColor === color, available)}
+                          >
+                            {color}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <p className="text-sm text-light-gray">
+                    {selectedVariant
+                      ? selectedVariant.stockQuantity <= 5
+                        ? `Only ${selectedVariant.stockQuantity} left in this size and colour`
+                        : 'In stock'
+                      : 'Choose a size and colour to see availability'}
                   </p>
-                )}
-              </div>
+                </div>
+              ) : (
+                <p className="text-sm text-red-300">Currently out of stock</p>
+              )}
 
               <div className="space-y-3">
                 <label className="text-white font-medium">Quantity</label>
@@ -194,6 +251,7 @@ function ProductDetail() {
                   <button
                     onClick={() => setQuantity((current) => Math.max(1, current - 1))}
                     disabled={!canAddToCart || quantity <= 1}
+                    aria-label="Decrease quantity"
                     className="w-10 h-10 rounded-lg bg-dark-secondary border border-dark-border flex items-center justify-center hover:border-white transition-colors disabled:opacity-40"
                   >
                     <Minus className="w-4 h-4 text-white" />
@@ -202,6 +260,7 @@ function ProductDetail() {
                   <button
                     onClick={() => setQuantity((current) => Math.min(maxStock, current + 1))}
                     disabled={!canAddToCart || quantity >= maxStock}
+                    aria-label="Increase quantity"
                     className="w-10 h-10 rounded-lg bg-dark-secondary border border-dark-border flex items-center justify-center hover:border-white transition-colors disabled:opacity-40"
                   >
                     <Plus className="w-4 h-4 text-white" />
@@ -209,28 +268,44 @@ function ProductDetail() {
                 </div>
               </div>
 
+              {cartError ? (
+                <p role="alert" className="text-sm text-red-300">
+                  {cartError}
+                </p>
+              ) : null}
+
               <div className="flex gap-4">
                 <motion.button
-                  whileHover={canAddToCart ? { scale: 1.02 } : undefined}
-                  whileTap={canAddToCart ? { scale: 0.98 } : undefined}
+                  whileHover={anyInStock ? { scale: 1.02 } : undefined}
+                  whileTap={anyInStock ? { scale: 0.98 } : undefined}
                   onClick={handleAddToCart}
-                  disabled={!canAddToCart}
+                  disabled={!anyInStock || isAdding}
                   className={`flex-1 px-8 py-4 rounded-lg font-medium transition-all duration-300 flex items-center justify-center gap-2 ${
                     isAdded ? 'bg-green-500 text-white' : 'bg-white text-black hover:bg-lighter-gray disabled:bg-dark-secondary disabled:text-light-gray'
                   }`}
                 >
                   <ShoppingCart className="w-5 h-5" />
-                  <span>{isAdded ? 'Added to Cart!' : canAddToCart ? 'Add to Cart' : 'Out of Stock'}</span>
+                  <span>{isAdded ? 'Added to Cart!' : !anyInStock ? 'Out of Stock' : isAdding ? 'Adding…' : 'Add to Cart'}</span>
                 </motion.button>
                 <motion.button
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => toggleFavorite(product)}
+                  aria-label={isLiked ? 'Remove from favourites' : 'Add to favourites'}
                   className="w-14 h-14 rounded-lg bg-dark-secondary border border-dark-border flex items-center justify-center hover:border-white transition-colors"
                 >
                   <Heart className={`w-6 h-6 transition-colors ${isLiked ? 'fill-red-500 text-red-500' : 'text-white'}`} />
                 </motion.button>
               </div>
+
+              {isAdded ? (
+                <p className="text-sm text-light-gray">
+                  Added.{' '}
+                  <Link href="/cart" className="text-white underline">
+                    View your cart
+                  </Link>
+                </p>
+              ) : null}
             </motion.div>
           </div>
         </div>
