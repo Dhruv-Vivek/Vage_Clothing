@@ -7,7 +7,7 @@ import { UserRound, MapPin, Package, Crown, ShieldCheck, Save, AlertCircle, Hear
 import { useAuth } from '@/context/AuthContext';
 
 export default function AccountPage() {
-  const { user, isLoggedIn, isLoading: authLoading, refresh } = useAuth();
+  const { user, isLoggedIn, isLoading: authLoading, refresh, setLoginModalOpen } = useAuth();
   const [profile, setProfile] = useState({ fullName: '', email: '', phone: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -78,7 +78,14 @@ export default function AccountPage() {
       <div className="min-h-[70vh] bg-dark px-4 pt-40 text-center">
         <UserRound className="mx-auto mb-5 h-12 w-12 text-light-gray" />
         <h1 className="text-3xl font-bold text-white">Your VAGE account</h1>
-        <p className="mt-3 text-light-gray">Sign in to manage your profile, addresses, wishlist and orders.</p>
+        <p className="mt-3 text-light-gray">Sign in to manage your profile, saved addresses, wishlist and recent orders.</p>
+        <button
+          type="button"
+          onClick={() => setLoginModalOpen(true)}
+          className="mt-7 rounded-lg bg-white px-6 py-3 font-semibold text-black transition hover:bg-lighter-gray"
+        >
+          Sign in to your account
+        </button>
       </div>
     );
   }
