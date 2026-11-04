@@ -24,6 +24,10 @@ Public sign-up continues to create CUSTOMER accounts. To promote an existing acc
 
 The script changes only the role of an existing active account. It does not create users, change passwords or expose role selection in public registration. Do not run it with a guessed or unowned email address.
 
+## PR #11 COD checkout database fields
+
+Before testing the COD checkout against MySQL, inspect and apply the additive migration `database/vage-pr11-cod-checkout-compat-migration.sql`. It ensures the order columns used by the current checkout, online checkout and lifecycle email queries exist: `contact_email`, `coupon_discount_amount`, `membership_discount_amount` and `delivery_method`. It is safe to re-run. The COD route itself creates the order with a locked transaction and does not call the missing `place_order` stored procedure.
+
 ## Contact inbox database requirement
 
 The inbox reads `contact_messages`, created by the existing `database/vage-gmail-contact-migration.sql` migration already in the main codebase. That table stores the submitted message and separate delivery statuses for the notification to VAGE and acknowledgement to the customer.
@@ -61,7 +65,7 @@ Admin API routes use the current signed-session, active-account and ADMIN-role c
 
 ## Local verification
 
-After pulling the integration branch, install dependencies and run:
+After pulling the integration branch, inspect and run the additive checkout migration above if those columns are not already present, then install dependencies and run:
 
 ```powershell
 npm ci
