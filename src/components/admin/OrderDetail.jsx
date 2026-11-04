@@ -47,7 +47,7 @@ export default function OrderDetail({ orderId }) {
   const moveTo = (status) => {
     if (status === 'CANCELLED' && !window.confirm('Cancel this order? The items go back into stock.')) return;
     act(
-      () => api(`/api/admin/orders/${orderId}`, { method: 'PATCH', body: { status, note } }),
+      () => api(`/api/admin/orders/${orderId}`, { method: 'PATCH', body: { nextStatus: status, note } }),
       `Order marked ${ORDER_STATUS_LABELS[status].toLowerCase()}`
     );
   };
@@ -60,7 +60,7 @@ export default function OrderDetail({ orderId }) {
 
   const { order, customer, address, items, payments, history, nextStatuses } = detail;
   const payment = payments[payments.length - 1];
-  const canMarkPaid = order.paymentStatus === 'PENDING' && !['CANCELLED', 'RETURNED'].includes(order.status);
+  const canMarkPaid = false;
 
   return (
     <>
