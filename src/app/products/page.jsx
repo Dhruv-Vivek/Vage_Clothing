@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import ProductCard from '@/components/ProductCard';
+import { trackProductEvent } from '@/lib/product-intelligence-client';
 
 function ProductsContent() {
   const searchParams = useSearchParams();
@@ -23,6 +24,24 @@ function ProductsContent() {
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    trackProductEvent({
+      eventType: 'PRODUCT_LIST_VIEW',
+      categorySlug: activeCategory === 'All' ? null : activeCategory,
+    });
+    if (activeCategory !== 'All') {
+      trackProductEvent({ eventType: 'CATEGORY_BROWSE', categorySlug: activeCategory });
+    }
+  }, [activeCategory]);
+
+  useEffect(() => {
+    if (!searchQuery.trim()) return undefined;
+    const timeout = setTimeout(() => {
+      trackProductEvent({ eventType: 'SEARCH', searchTerm: searchQuery });
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [searchQuery]);
 
   useEffect(() => {
     let cancelled = false;
