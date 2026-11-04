@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { adminRoute } from '@/lib/admin';
 
