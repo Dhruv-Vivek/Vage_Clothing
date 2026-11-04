@@ -1,6 +1,7 @@
 import { adminRoute, HttpError, cleanText, readJson, toId, withTransaction, run } from '@/lib/admin';
 import { loadOrderDetail } from '@/lib/orders';
 import { ADMIN_NEXT_STATUS } from '@/lib/order-status';
+import { enqueuePaidOrderEmails, dispatchEmailsByDedupeKeys } from '@/lib/order-email';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,10 +73,33 @@ export const POST = adminRoute(async ({ request, params }) => {
     if (orderUpdate.affectedRows !== 1) {
       throw new HttpError(409, 'The order payment status changed. Refresh and check the order.');
     }
+
+    const emailRows = await run(
+      connection,
+      `SELECT o.order_id, o.order_number,
+              COALESCE(NULLIF(o.contact_email, ''), u.email) AS email
+         FROM orders o
+         INNER JOIN users u ON u.user_id = o.user_id
+        WHERE o.order_id = ?
+        LIMIT 1`,
+      [orderId]
+    );
+    if (emailRows[0]?.email) {
+      await enqueuePaidOrderEmails(connection, emailRows[0]);
+    }
   });
+
+  const emailDelivery = await dispatchEmailsByDedupeKeys([
+    `order-confirmation/${orderId}`,
+    `payment-receipt/${orderId}`,
+  ]).catch((error) => [{
+    status: 'FAILED',
+    error: String(error?.message || 'Unable to dispatch COD payment emails.'),
+  }]);
 
   const detail = await loadOrderDetail(orderId, { admin: true });
   if (!detail) throw new HttpError(404, 'Order not found.');
   detail.nextStatuses = ADMIN_NEXT_STATUS[detail.order.status] || [];
+  detail.emailDelivery = emailDelivery;
   return detail;
 });
