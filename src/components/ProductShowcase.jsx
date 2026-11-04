@@ -3,18 +3,13 @@
 import { motion } from 'framer-motion';
 import { ShoppingCart } from 'lucide-react';
 import { CardContainer, CardBody, CardItem } from './ui/card-3d';
-import { useState } from 'react';
-import { useCart } from '../context/CartContext';
+import { useRouter } from 'next/navigation';
 
 function ProductShowcase({ product, reverse = false }) {
-  const [isAdded, setIsAdded] = useState(false);
-  const { addToCart } = useCart();
+  const router = useRouter();
 
-  const handleAddToCart = () => {
-    addToCart(product);
-    setIsAdded(true);
-    setTimeout(() => setIsAdded(false), 2000);
-  };
+  // A cart line is a specific size and colour, so choosing one happens on the product page.
+  const handleChooseOptions = () => router.push(`/products/${product.id}`);
 
   return (
     <motion.section
@@ -81,17 +76,11 @@ function ProductShowcase({ product, reverse = false }) {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={handleAddToCart}
-                className={`group px-6 py-3 rounded-lg transition-all duration-300 flex items-center gap-2 ${
-                  isAdded 
-                    ? 'bg-green-500 text-white' 
-                    : 'bg-white text-black hover:bg-lighter-gray'
-                }`}
+                onClick={handleChooseOptions}
+                className="group px-6 py-3 rounded-lg transition-all duration-300 flex items-center gap-2 bg-white text-black hover:bg-lighter-gray"
               >
                 <ShoppingCart className="w-5 h-5" />
-                <span className="font-medium">
-                  {isAdded ? 'Added to Cart!' : 'Add to Cart'}
-                </span>
+                <span className="font-medium">Choose Size &amp; Add to Cart</span>
               </motion.button>
             </motion.div>
 

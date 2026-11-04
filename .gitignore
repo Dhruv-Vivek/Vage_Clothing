@@ -38,3 +38,4 @@ next-env.d.ts
 # Local MySQL schema export (contains development-specific database structure)
 schema_dump.sql
 /uploads/
+.env.local
