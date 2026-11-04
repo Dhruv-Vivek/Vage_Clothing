@@ -84,6 +84,25 @@ export function adminRoute(handler) {
   };
 }
 
+
+/** Convert shared API errors into safe customer-facing JSON responses. */
+export function toErrorResponse(error, request) {
+  if (error instanceof HttpError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+  const mapped = describeDbError(error);
+  if (mapped) {
+    return NextResponse.json({ error: mapped[1] }, { status: mapped[0] });
+  }
+  if (error?.code === 'ER_LOCK_DEADLOCK' || error?.code === 'ER_LOCK_WAIT_TIMEOUT') {
+    return NextResponse.json({ error: 'The order is being updated by another request. Please retry.' }, { status: 409 });
+  }
+  const method = request?.method || 'REQUEST';
+  const pathname = request?.url ? new URL(request.url).pathname : '/api';
+  console.error(`[${method} ${pathname}]`, error);
+  return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
+}
+
 /* ------------------------------------------------------------------ */
 /* Input validation                                                    */
 /* ------------------------------------------------------------------ */
