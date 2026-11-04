@@ -39,6 +39,8 @@ async function postAuthRequest(endpoint, body) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Lives here (not in the Navbar) so any page can ask the customer to log in, e.g. when adding to the cart.
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -123,7 +125,9 @@ export function AuthProvider({ children }) {
     register,
     logout,
     refresh,
-  }), [user, isLoading, hasMembership, membershipType, login, register, logout, refresh]);
+    loginModalOpen,
+    setLoginModalOpen,
+  }), [user, isLoading, hasMembership, membershipType, login, register, logout, refresh, loginModalOpen]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

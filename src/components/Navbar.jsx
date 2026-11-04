@@ -20,10 +20,9 @@ import LoginModal from './LoginModal';
 function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const { cartCount, favorites } = useCart();
-  const { user, isLoggedIn, isLoading, logout } = useAuth();
+  const { user, isLoggedIn, isLoading, logout, loginModalOpen, setLoginModalOpen } = useAuth();
   const router = useRouter();
 
   const handleSearch = (event) => {
@@ -108,6 +107,9 @@ function Navbar() {
             {/* Login/User Button - Corrected placement and logic */}
             {isLoading ? null : isLoggedIn ? (
               <div className="hidden md:flex items-center gap-4">
+                <Link href="/orders" className="text-sm text-light-gray hover:text-white transition-colors">
+                  My orders
+                </Link>
                 {user.role === 'ADMIN' && (
                   <Link
                     href="/admin"
@@ -116,8 +118,6 @@ function Navbar() {
                     Admin
                   </Link>
                 )}
-                <Link href="/account" className="text-sm text-light-gray transition-colors hover:text-white">Account</Link>
-                <Link href="/account/orders" className="text-sm text-light-gray transition-colors hover:text-white">Orders</Link>
                 <div className="flex items-center gap-2 text-white">
                   <User className="w-5 h-5" />
                   <span className="text-sm font-medium">{user.name}</span>
@@ -204,13 +204,6 @@ function Navbar() {
                   {link.name}
                 </Link>
               ))}
-              {isLoggedIn && (
-                <>
-                  <Link href="/account" className="block border-t border-dark-border pt-4 text-light-gray hover:text-white" onClick={() => setMobileMenuOpen(false)}>My Account</Link>
-                  <Link href="/account/orders" className="block text-light-gray hover:text-white" onClick={() => setMobileMenuOpen(false)}>My Orders</Link>
-                  <Link href="/account/addresses" className="block text-light-gray hover:text-white" onClick={() => setMobileMenuOpen(false)}>Saved Addresses</Link>
-                </>
-              )}
               {/* Mobile Login Button */}
               {!isLoggedIn && (
                 <button 
@@ -222,6 +215,15 @@ function Navbar() {
                 >
                   Login
                 </button>
+              )}
+              {isLoggedIn && (
+                <Link
+                  href="/orders"
+                  className="block text-light-gray hover:text-white transition-colors py-2"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  My orders
+                </Link>
               )}
               {/* Mobile Logout Button */}
               {isLoggedIn && (

@@ -1,275 +1,156 @@
 'use client';
 
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import { trackProductEvent } from '@/lib/product-intelligence-client';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useAuth } from './AuthContext';
 
-const CartContext = createContext(null);
-
-function formatPrice(value) {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 2,
-  }).format(Number(value || 0));
-}
-
-function legacyPrice(value) {
-  if (typeof value === 'number') return value;
-  return Number(String(value || '0').replace(/[^0-9.]/g, '')) || 0;
-}
+const CartContext = createContext();
 
 export function useCart() {
-  const context = useContext(CartContext);
-  if (!context) throw new Error('useCart must be used within a CartProvider');
-  return context;
+  return useContext(CartContext);
 }
 
-export function CartProvider({ children }) {
-  const [cartItems, setCartItems] = useState([]);
-  const [favorites, setFavorites] = useState([]);
-  const [isCartLoaded, setIsCartLoaded] = useState(false);
-  const { user, isLoading: authLoading, isLoggedIn } = useAuth();
-  const wishlistSyncUserRef = useRef(null);
+const EMPTY_CART = { items: [], subtotal: 0, count: 0, hasIssues: false };
 
+async function cartRequest(url, { method = 'GET', body } = {}) {
+  const response = await fetch(url, {
+    method,
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || 'Something went wrong. Please try again.');
+  return payload;
+}
+
+/**
+ * The cart now lives in MySQL (carts / cart_items) for the signed-in customer, so the order can be
+ * built from it by the place_order procedure. Favourites remain a browser-only convenience.
+ * Every cart action resolves to { ok, error? } so pages can show a message instead of crashing.
+ */
+export function CartProvider({ children }) {
+  const { user, isLoading: authLoading, setLoginModalOpen } = useAuth();
+  const userId = user?.id ?? null;
+
+  const [cart, setCart] = useState(EMPTY_CART);
+  const [isCartLoaded, setIsCartLoaded] = useState(false);
+  const [favorites, setFavorites] = useState([]);
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+
+  // Favourites (browser only). Also drop the old browser-side cart/orders from before orders were stored in MySQL.
   useEffect(() => {
     try {
-      const savedCart = localStorage.getItem('cart');
-      const savedFavorites = localStorage.getItem('favorites');
-      if (savedCart) {
-        const parsed = JSON.parse(savedCart);
-        if (Array.isArray(parsed)) setCartItems(parsed);
-      }
-      if (savedFavorites) {
-        const parsed = JSON.parse(savedFavorites);
-        if (Array.isArray(parsed)) setFavorites(parsed);
-      }
-    } catch {
       localStorage.removeItem('cart');
-      localStorage.removeItem('favorites');
+      localStorage.removeItem('orders');
+      const saved = localStorage.getItem('favorites');
+      if (saved) setFavorites(JSON.parse(saved));
+    } catch {
+      try {
+        localStorage.removeItem('favorites');
+      } catch {
+        /* storage unavailable */
+      }
     }
-    setIsCartLoaded(true);
+    setFavoritesLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (!isCartLoaded) return;
-    localStorage.setItem('cart', JSON.stringify(cartItems));
-  }, [cartItems, isCartLoaded]);
+    if (!favoritesLoaded) return;
+    try {
+      localStorage.setItem('favorites', JSON.stringify(favorites));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [favorites, favoritesLoaded]);
 
-  useEffect(() => {
-    // Local storage is only the guest wishlist. Authenticated wishlists live in MySQL.
-    if (!isCartLoaded || isLoggedIn) return;
-    localStorage.setItem('favorites', JSON.stringify(favorites));
-  }, [favorites, isCartLoaded, isLoggedIn]);
- 
-  const currentUserId = user?.id ?? null;
-
-  // Authenticated customers use the MySQL wishlist as the source of truth.
-  // Guest favorites are merged into the account once at sign-in.
-  useEffect(() => {
-    if (!isCartLoaded || authLoading) return;
-    if (currentUserId === null) {
-      if (wishlistSyncUserRef.current !== null) {
-        wishlistSyncUserRef.current = null;
-        setFavorites([]);
-      }
+  const refreshCart = useCallback(async () => {
+    if (!userId) {
+      setCart(EMPTY_CART);
       return;
     }
-    if (wishlistSyncUserRef.current === currentUserId) return;
-    const previousUserId = wishlistSyncUserRef.current;
-    const guestFavorites = previousUserId === null ? favorites : [];
-    if (previousUserId !== null && previousUserId !== currentUserId) setFavorites([]);
-    wishlistSyncUserRef.current = currentUserId;
+    try {
+      setCart(await cartRequest('/api/cart'));
+    } catch (error) {
+      console.error('Unable to load cart:', error);
+    }
+  }, [userId]);
+
+  // Reload whenever the signed-in customer changes (login, logout, switching accounts).
+  useEffect(() => {
+    if (authLoading) return undefined;
     let cancelled = false;
-
-    async function syncWishlist() {
-      const localIds = [...new Set(guestFavorites.map((item) => Number(item.productId || item.id))
-        .filter((id) => Number.isSafeInteger(id) && id > 0))];
-      if (localIds.length) {
-        const mergeResponse = await fetch('/api/account/wishlist', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          cache: 'no-store',
-          body: JSON.stringify({ productIds: localIds }),
-        });
-        const mergeBody = await mergeResponse.json().catch(() => ({}));
-        if (!mergeResponse.ok) {
-          throw new Error(mergeBody.error || 'Unable to merge guest wishlist.');
-        }
-      }
-      const response = await fetch('/api/account/wishlist', {
-        credentials: 'same-origin',
-        cache: 'no-store',
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || 'Unable to sync wishlist.');
-      if (!cancelled) {
-        try { localStorage.removeItem('favorites'); } catch { /* local storage may be unavailable */ }
-        setFavorites(Array.isArray(body.products) ? body.products : []);
-      }
-    }
-
-    syncWishlist().catch((error) => {
-      console.error('Unable to sync the VAGE wishlist:', error);
-      wishlistSyncUserRef.current = null;
-    });
-    return () => { cancelled = true; };
-  }, [isCartLoaded, authLoading, currentUserId, favorites]);
-
-  // A cart line is one exact product variant (product + size + colour).
-  const addToCart = (product, variant, quantity = 1) => {
-    const variantId = Number(variant?.variantId);
-    const requestedQuantity = Number(quantity);
-    if (
-      !Number.isSafeInteger(variantId) ||
-      variantId <= 0 ||
-      !Number.isSafeInteger(requestedQuantity) ||
-      requestedQuantity < 1
-    ) {
-      return false;
-    }
-
-    const id = `variant-${variantId}`;
-    trackProductEvent({ eventType: 'ADD_TO_CART', productId: Number(product.productId || product.id), variantId, quantity: requestedQuantity });
-    const unitPrice = Number(variant.unitPrice);
-    const stockQuantity = Number(variant.stockQuantity || 0);
-    const line = {
-      ...product,
-      id,
-      productId: Number(product.productId || product.id),
-      variantId,
-      sku: variant.sku,
-      size: variant.size,
-      color: variant.color,
-      unitPrice,
-      price: formatPrice(unitPrice),
-      stockQuantity,
-      quantity: requestedQuantity,
+    (async () => {
+      await refreshCart();
+      if (!cancelled) setIsCartLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
     };
+  }, [authLoading, refreshCart]);
 
-    setCartItems((previous) => {
-      const existing = previous.find((item) => item.id === id);
-      if (!existing) return [...previous, line];
-      const nextQuantity = Math.min(
-        stockQuantity,
-        Number(existing.quantity || 0) + requestedQuantity
-      );
-      return previous.map((item) => item.id === id
-        ? { ...item, quantity: nextQuantity, stockQuantity, unitPrice, price: formatPrice(unitPrice) }
-        : item);
-    });
-
-    return true;
-  };
-
-  const removeFromCart = (lineId) => {
-    const item = cartItems.find((entry) => entry.id === lineId);
-    if (item && Number.isSafeInteger(Number(item.productId))) {
-      trackProductEvent({
-        eventType: 'REMOVE_FROM_CART',
-        productId: Number(item.productId),
-        variantId: item.variantId || null,
-        quantity: Number(item.quantity || 1),
-      });
+  const run = useCallback(async (request) => {
+    try {
+      setCart(await request());
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error.message };
     }
-    setCartItems((previous) => previous.filter((entry) => entry.id !== lineId));
-  };
+  }, []);
 
-  const updateQuantity = (lineId, quantity) => {
-    const nextQuantity = Number(quantity);
-    if (!Number.isSafeInteger(nextQuantity) || nextQuantity <= 0) {
-      removeFromCart(lineId);
-      return;
-    }
-    const current = cartItems.find((item) => item.id === lineId);
-    if (current && nextQuantity !== Number(current.quantity) && Number.isSafeInteger(Number(current.productId))) {
-      trackProductEvent({
-        eventType: 'CART_QUANTITY_UPDATE',
-        productId: Number(current.productId),
-        variantId: current.variantId || null,
-        quantity: nextQuantity,
-      });
-    }
-    setCartItems((previous) => previous.map((item) => {
-      if (item.id !== lineId) return item;
-      const max = Number(item.stockQuantity || nextQuantity);
-      return { ...item, quantity: Math.min(nextQuantity, Math.max(1, max)) };
-    }));
-  };
-
-  const toggleFavorite = async (product) => {
-    const productId = Number(product.productId || product.id);
-    if (!Number.isSafeInteger(productId) || productId <= 0) return false;
-    const exists = favorites.some((item) => Number(item.productId || item.id) === productId);
-    const next = exists
-      ? favorites.filter((item) => Number(item.productId || item.id) !== productId)
-      : [...favorites, product];
-    setFavorites(next);
-
-    if (isLoggedIn && !authLoading) {
-      try {
-        const response = exists
-          ? await fetch('/api/account/wishlist?productId=' + productId, {
-              method: 'DELETE',
-              credentials: 'same-origin',
-              cache: 'no-store',
-            })
-          : await fetch('/api/account/wishlist', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              cache: 'no-store',
-              body: JSON.stringify({ productId }),
-            });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || 'Unable to update wishlist.');
-      } catch (error) {
-        console.error('Unable to update the VAGE wishlist:', error);
-        setFavorites((current) => exists
-          ? [...current, product].filter((item, index, items) =>
-              items.findIndex((entry) => Number(entry.productId || entry.id) === Number(item.productId || item.id)) === index)
-          : current.filter((item) => Number(item.productId || item.id) !== productId));
-        return false;
+  /** Add a specific size/colour. Guests are asked to log in first. */
+  const addToCart = useCallback(
+    (variantId, quantity = 1) => {
+      if (!userId) {
+        setLoginModalOpen(true);
+        return Promise.resolve({ ok: false, needsLogin: true, error: 'Please log in to add items to your cart.' });
       }
-    }
-    return true;
+      return run(() => cartRequest('/api/cart/items', { method: 'POST', body: { variantId, quantity } }));
+    },
+    [userId, run, setLoginModalOpen]
+  );
+
+  const updateQuantity = useCallback(
+    (variantId, quantity) =>
+      run(() => cartRequest(`/api/cart/items/${variantId}`, { method: 'PATCH', body: { quantity } })),
+    [run]
+  );
+
+  const removeFromCart = useCallback(
+    (variantId) => run(() => cartRequest(`/api/cart/items/${variantId}`, { method: 'DELETE' })),
+    [run]
+  );
+
+  /** Called after an order is placed (the database has already emptied the cart). */
+  const clearCart = useCallback(() => setCart(EMPTY_CART), []);
+
+  const toggleFavorite = (product) => {
+    setFavorites((prev) =>
+      prev.find((item) => item.id === product.id) ? prev.filter((item) => item.id !== product.id) : [...prev, product]
+    );
   };
+  const isFavorite = (productId) => favorites.some((item) => item.id === productId);
 
-  const isFavorite = (productId) => favorites.some(
-    (item) => Number(item.id) === Number(productId)
+  const value = useMemo(
+    () => ({
+      cartItems: cart.items,
+      cartTotal: cart.subtotal,
+      cartCount: cart.count,
+      cartHasIssues: cart.hasIssues,
+      isCartLoaded,
+      refreshCart,
+      addToCart,
+      updateQuantity,
+      removeFromCart,
+      clearCart,
+      favorites,
+      toggleFavorite,
+      isFavorite,
+    }),
+    // toggleFavorite/isFavorite are recreated each render on purpose (they close over favorites)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cart, isCartLoaded, refreshCart, addToCart, updateQuantity, removeFromCart, clearCart, favorites]
   );
 
-  const clearCart = () => setCartItems([]);
-
-  const cartTotal = cartItems.reduce((total, item) => {
-    const unitPrice = Number.isFinite(Number(item.unitPrice))
-      ? Number(item.unitPrice)
-      : legacyPrice(item.price);
-    return total + unitPrice * Number(item.quantity || 0);
-  }, 0);
-
-  const cartCount = cartItems.reduce((count, item) => count + Number(item.quantity || 0), 0);
-  const hasUnselectedVariants = cartItems.some((item) => !Number.isSafeInteger(Number(item.variantId)));
-
-  return (
-    <CartContext.Provider
-      value={{
-        cartItems,
-        favorites,
-        addToCart,
-        removeFromCart,
-        updateQuantity,
-        toggleFavorite,
-        isFavorite,
-        clearCart,
-        cartTotal,
-        cartCount,
-        isCartLoaded,
-        hasUnselectedVariants,
-      }}
-    >
-      {children}
-    </CartContext.Provider>
-  );
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

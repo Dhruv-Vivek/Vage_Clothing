@@ -47,9 +47,29 @@ function describeDbError(error) {
     const known = DB_ERROR_MESSAGES.find(([key]) => message.includes(key));
     return known ? [known[1], known[2]] : [409, 'That value already exists.'];
   }
+  if (error?.code === 'ER_LOCK_DEADLOCK' || error?.code === 'ER_LOCK_WAIT_TIMEOUT') {
+    return [409, 'The store was busy handling another request. Please try again.'];
+  }
   if (error?.code === 'ER_NO_REFERENCED_ROW_2') return [400, 'The selected category does not exist.'];
   if (error?.code === 'ER_CHECK_CONSTRAINT_VIOLATED') return [400, 'A value is outside the allowed range.'];
+  // Business-rule errors raised with SIGNAL SQLSTATE '45000' by place_order, confirm_payment and the order triggers.
+  // Their messages are written for people, so they are safe to show. Stock problems are conflicts (409).
+  if (error?.sqlState === '45000' && error.sqlMessage) {
+    return [/stock/i.test(error.sqlMessage) ? 409 : 400, error.sqlMessage];
+  }
   return null;
+}
+
+/** Turns any thrown error into a clean JSON response (HttpError, known MySQL errors, or a generic 500). */
+export function toErrorResponse(error, request) {
+  if (error instanceof HttpError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+  const mapped = describeDbError(error);
+  if (mapped) return NextResponse.json({ error: mapped[1] }, { status: mapped[0] });
+
+  console.error(`[api ${request.method} ${new URL(request.url).pathname}]`, error);
+  return NextResponse.json({ error: 'Something went wrong. Please try again.' }, { status: 500 });
 }
 
 /**
@@ -69,17 +89,7 @@ export function adminRoute(handler) {
       if (result instanceof Response) return result;
       return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
     } catch (error) {
-      if (error instanceof HttpError) {
-        return NextResponse.json({ error: error.message }, { status: error.status });
-      }
-      const mapped = describeDbError(error);
-      if (mapped) return NextResponse.json({ error: mapped[1] }, { status: mapped[0] });
-
-      console.error(`[admin ${request.method} ${new URL(request.url).pathname}]`, error);
-      return NextResponse.json(
-        { error: 'Something went wrong. Please try again.' },
-        { status: 500 }
-      );
+      return toErrorResponse(error, request);
     }
   };
 }
