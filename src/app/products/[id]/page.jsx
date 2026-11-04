@@ -22,6 +22,7 @@ function ProductDetail() {
   const [cartError, setCartError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const viewedProductIdRef = useRef(null);
 
   useEffect(() => {
     const controller = new AbortController();

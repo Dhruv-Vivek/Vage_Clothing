@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Boxes, LayoutDashboard, LogOut, Mail, ShoppingBag, Shirt, Store, Users } from 'lucide-react';
+import { Boxes, LayoutDashboard, LogOut, Mail, ShoppingBag, Shirt, Store, TrendingUp, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 const NAV = [

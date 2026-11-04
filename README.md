@@ -14,7 +14,7 @@ VAGE is a dark, premium clothing e-commerce application built with Next.js. The 
 - Email: Gmail SMTP through Nodemailer, with a MySQL email outbox
 - Version control: Git and GitHub
 
-MongoDB and vector search are not currently integrated in this branch. MySQL remains the source of truth for all implemented e-commerce transactions.
+MongoDB is integrated for Phase 8 product intelligence event documents and behavioural aggregations. MySQL remains the source of truth for all catalogue, inventory, customer, order, payment and membership transactions.
 
 ## Application capabilities
 
@@ -54,6 +54,13 @@ MongoDB and vector search are not currently integrated in this branch. MySQL rem
 - Paginated order history
 - Order detail, delivery progress and status history
 - Saved-address selection during checkout
+
+### Product intelligence (Phase 8)
+
+- MongoDB event storage for product views, searches, category browsing and cart activity
+- Aggregation reports for popular products, category trends and top search terms
+- Admin dashboard at /admin/product-intelligence
+- MySQL remains authoritative for catalogue and transaction records
 
 ### Customer support
 
@@ -96,6 +103,8 @@ MongoDB and vector search are not currently integrated in this branch. MySQL rem
 | /api/orders/* | Owner-scoped order details and email retry |
 | /api/contact | Contact message persistence |
 | /api/cron/* | Protected email/webhook and pending-order workers |
+| /api/analytics/events | Validated product intelligence event ingestion |
+| /api/admin/product-intelligence | Admin-only MongoDB aggregation report |
 
 ## Local development
 
@@ -147,6 +156,9 @@ Configure these in .env.local (do not commit the file):
 - GMAIL_APP_PASSWORD
 - VAGE_CONTACT_TO
 - CRON_SECRET
+- MONGODB_URI
+- MONGODB_DATABASE (defaults to vage_product_intelligence)
+- PRODUCT_INTELLIGENCE_ENABLED=true
 
 Use test/sandbox payment credentials during development. Do not switch to live payment credentials until the complete payment lifecycle has been tested and production security/configuration is reviewed.
 
@@ -178,5 +190,6 @@ The Phase 9–10 migration is additive. Saved addresses are stored separately fr
 - BATCH6.2-RAZORPAY-CHECKOUT.md — Razorpay checkout and webhook setup
 - EMAIL-SETUP.md — Gmail SMTP and Contact Us email setup
 - PHASE-9-10-MEMBERSHIP-ACCOUNT.md — Membership and customer account migration, routes and verification checklist
+- PHASE-8-MONGODB-PRODUCT-INTELLIGENCE.md — MongoDB setup, event model, SQL-vs-NoSQL decisions and Python verification
 
 Before merging or deploying, run the local build/lint commands, apply migrations to a test database, and complete the payment, email, membership and customer-account verification checklists.

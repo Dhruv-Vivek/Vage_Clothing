@@ -55,15 +55,29 @@ export default function ContactForm() {
               <div className="space-y-6">
                 <div className="flex gap-4">
                   <span className="w-11 h-11 rounded-full bg-white/5 flex items-center justify-center"><Mail className="w-5 h-5 text-white"/></span>
-                  <div><p className="text-white font-medium">Email</p><p className="text-light-gray text-sm mt-1">Use the contact form to reach our support inbox.</p></div>
+                  <div className="min-w-0">
+                    <p className="text-white font-medium">Email</p>
+                    <a href="mailto:vageclothing2@gmail.com" className="mt-1 inline-block break-all text-sm text-light-gray transition-colors hover:text-white hover:underline">
+                      vageclothing2@gmail.com
+                    </a>
+                  </div>
                 </div>
                 <div className="flex gap-4">
                   <span className="w-11 h-11 rounded-full bg-white/5 flex items-center justify-center"><Phone className="w-5 h-5 text-white"/></span>
-                  <div><p className="text-white font-medium">Phone</p><p className="text-light-gray text-sm mt-1">Add a support number when one is available.</p></div>
+                  <div>
+                    <p className="text-white font-medium">Phone</p>
+                    <p className="mt-1 text-sm text-light-gray">080-0000 0000 <span className="text-xs text-light-gray/60">(demo number)</span></p>
+                  </div>
                 </div>
                 <div className="flex gap-4">
                   <span className="w-11 h-11 rounded-full bg-white/5 flex items-center justify-center"><MapPin className="w-5 h-5 text-white"/></span>
-                  <div><p className="text-white font-medium">Location</p><p className="text-light-gray text-sm mt-1">Online customer support</p></div>
+                  <div className="min-w-0">
+                    <p className="text-white font-medium">Location</p>
+                    <p className="mt-1 text-sm leading-6 text-light-gray">
+                      Barton Centre, No. 84, MG Road, Ashok Nagar, Bengaluru, Karnataka 560001
+                    </p>
+                    <p className="mt-1 text-xs text-light-gray/60">Demo address reference only — not a verified VAGE office.</p>
+                  </div>
                 </div>
               </div>
               <div className="mt-9 border-t border-dark-border pt-6">
