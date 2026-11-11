@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: this route reads cart, variant, coupon and membership pricing using transaction-bound SQL queries; the quote is not the final checkout commit.
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getPool } from '@/lib/db';

@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: online order creation uses row locks and transactional SQL before creating a payment-provider order.
 import { NextResponse } from 'next/server';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { getCurrentUser } from '@/lib/auth';

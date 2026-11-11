@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: the Razorpay webhook persists provider events and protects processing with unique keys/transactions before the worker reconciles payment state.
 import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { getPool } from '@/lib/db';

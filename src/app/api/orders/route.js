@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: this route reads the signed-in customer's order history using parameterized SELECT statements and joined order data.
 import { query } from '@/lib/db';
 import { userRoute } from '@/lib/api';
 

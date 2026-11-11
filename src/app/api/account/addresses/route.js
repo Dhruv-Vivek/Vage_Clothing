@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: the address book uses SELECT/INSERT and transaction-bound UPDATE statements; ownership checks use the authenticated user id.
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getPool } from '@/lib/db';

@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: address edits/default selection are protected by owner-scoped SELECTs and a transaction with INSERT/UPDATE/DELETE statements.
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getPool } from '@/lib/db';

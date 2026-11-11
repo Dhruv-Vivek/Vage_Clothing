@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: checkout is a server-side transaction containing SELECT ... FOR UPDATE, INSERT order/payment rows and conditional UPDATE inventory statements.
 import { randomBytes } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { userRoute } from '@/lib/api';
