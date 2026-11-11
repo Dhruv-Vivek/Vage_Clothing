@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: this route checks address ownership with a parameterized SELECT and calls the default-address stored procedure.
 import { query, getPool } from '@/lib/db';
 import { userRoute } from '@/lib/api';
 import { HttpError, readJson, toId } from '@/lib/validate';

@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: cart quantity updates/removals use parameterized SELECT/UPDATE/DELETE statements.
 import { query } from '@/lib/db';
 import { userRoute } from '@/lib/api';
 import { MAX_LINE_QUANTITY, loadCart } from '@/lib/cart';

@@ -18,6 +18,7 @@ export default function OrderDetailPage() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const [cancelling, setCancelling] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -44,6 +45,15 @@ export default function OrderDetailPage() {
       if (!response.ok) throw new Error(body.error);
       setDetail(body);
       setError('');
+      if (body.cancellation?.alreadyFinal) {
+        setNotice('This order was already cancelled.');
+      } else if (body.cancellation?.refunded) {
+        setNotice(body.cancellation.simulatedRefund
+          ? 'Order cancelled. The demo payment refund was recorded.'
+          : `Order cancelled. Refund reference: ${body.cancellation.refundId || 'submitted'}.`);
+      } else {
+        setNotice('Order cancelled successfully.');
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -73,6 +83,7 @@ export default function OrderDetailPage() {
         </Link>
 
         {error ? <p role="alert" className="mb-6 rounded-lg border border-red-500/40 px-4 py-3 text-sm text-red-300">{error}</p> : null}
+        {notice ? <p role="status" className="mb-6 rounded-lg border border-emerald-500/30 px-4 py-3 text-sm text-emerald-200">{notice}</p> : null}
         {!detail && !error ? <p className="text-light-gray">Loading order…</p> : null}
 
         {detail && (

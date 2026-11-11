@@ -7,10 +7,10 @@ import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
 
 export default function FavoritesPage() {
-  const { favorites, isCartLoaded } = useCart();
+  const { favorites, favoritesLoaded } = useCart();
   const { isLoading: authLoading } = useAuth();
 
-  if (!isCartLoaded || authLoading) return <div className="min-h-[65vh] bg-dark pt-40 text-center text-light-gray">Loading your wishlist…</div>;
+  if (!favoritesLoaded || authLoading) return <div className="min-h-[65vh] bg-dark pt-40 text-center text-light-gray">Loading your wishlist…</div>;
 
   return (
     <div className="min-h-screen bg-dark">

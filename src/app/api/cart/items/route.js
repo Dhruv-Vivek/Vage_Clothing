@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: cart-item creation uses server-side SELECT/INSERT/UPDATE statements and checks current product stock.
 import { userRoute } from '@/lib/api';
 import { MAX_LINE_QUANTITY, loadCart } from '@/lib/cart';
 import { HttpError, cleanInt, readJson, run, toId, withTransaction } from '@/lib/validate';

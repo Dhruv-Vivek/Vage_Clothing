@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: coupon validation reads the coupon and cart data with parameterized SELECT statements; final discount checks run again inside checkout.
 import { query } from '@/lib/db';
 import { userRoute } from '@/lib/api';
 import { loadCart } from '@/lib/cart';

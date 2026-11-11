@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: this route uses parameterized SELECT statements and a correlated subquery to build the signed-in customer's order history.
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getPool } from '@/lib/db';

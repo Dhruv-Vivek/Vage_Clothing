@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: registration writes the new customer using a parameterized INSERT after server-side validation and password hashing.
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import {

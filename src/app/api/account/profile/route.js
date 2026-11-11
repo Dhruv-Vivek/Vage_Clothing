@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: profile reads/updates are parameterized SELECT and UPDATE statements executed server-side through mysql2.
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getPool } from '@/lib/db';

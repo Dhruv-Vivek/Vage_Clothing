@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: contact submissions are rate-limited and inserted into contact_messages with parameterized SQL; email delivery is queued separately.
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db';
 import { dispatchContactMessageEmails } from '@/lib/contact-email';

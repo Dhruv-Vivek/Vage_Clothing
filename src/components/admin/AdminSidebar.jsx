@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Boxes, LayoutDashboard, LogOut, Mail, ShoppingBag, Shirt, Store, TrendingUp, Users } from 'lucide-react';
+import { Boxes, LayoutDashboard, LogOut, Mail, RotateCcw, ShoppingBag, Shirt, Store, TrendingUp, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 const NAV = [
@@ -10,10 +10,12 @@ const NAV = [
   { href: '/admin/products', label: 'Products', icon: Shirt },
   { href: '/admin/inventory', label: 'Inventory', icon: Boxes },
   { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
+  { href: '/admin/returns', label: 'Returns', icon: RotateCcw },
+  { href: '/admin/product-intelligence', label: 'Product intelligence', icon: TrendingUp },
+  { href: '/admin/messages', label: 'Messages', icon: Mail },
 ];
 const COMING = [
   { label: 'Customers', icon: Users },
-  { label: 'Messages', icon: Mail },
 ];
 
 export default function AdminSidebar({ name }) {

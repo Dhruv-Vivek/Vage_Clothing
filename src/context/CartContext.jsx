@@ -11,6 +11,16 @@ export function useCart() {
 
 const EMPTY_CART = { items: [], subtotal: 0, count: 0, hasIssues: false };
 
+function readStoredFavorites() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('favorites') || '[]');
+    if (!Array.isArray(saved)) return [];
+    return saved.filter((product) => Number.isSafeInteger(Number(product?.id)) && Number(product.id) > 0);
+  } catch {
+    return [];
+  }
+}
+
 async function cartRequest(url, { method = 'GET', body } = {}) {
   const response = await fetch(url, {
     method,
@@ -25,8 +35,8 @@ async function cartRequest(url, { method = 'GET', body } = {}) {
 }
 
 /**
- * The cart now lives in MySQL (carts / cart_items) for the signed-in customer, so the order can be
- * built from it by the place_order procedure. Favourites remain a browser-only convenience.
+ * Signed-in carts and wishlists are stored in MySQL. Guest favorites stay in localStorage
+ * and are merged into the customer's account when they sign in.
  * Every cart action resolves to { ok, error? } so pages can show a message instead of crashing.
  */
 export function CartProvider({ children }) {
@@ -38,31 +48,84 @@ export function CartProvider({ children }) {
   const [favorites, setFavorites] = useState([]);
   const [favoritesLoaded, setFavoritesLoaded] = useState(false);
 
-  // Favourites (browser only). Also drop the old browser-side cart/orders from before orders were stored in MySQL.
+  // Remove the legacy browser-side cart/orders from before these records moved to MySQL.
   useEffect(() => {
     try {
       localStorage.removeItem('cart');
       localStorage.removeItem('orders');
-      const saved = localStorage.getItem('favorites');
-      if (saved) setFavorites(JSON.parse(saved));
-    } catch {
-      try {
-        localStorage.removeItem('favorites');
-      } catch {
-        /* storage unavailable */
-      }
-    }
-    setFavoritesLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!favoritesLoaded) return;
-    try {
-      localStorage.setItem('favorites', JSON.stringify(favorites));
     } catch {
       /* storage unavailable */
     }
-  }, [favorites, favoritesLoaded]);
+  }, []);
+
+  // Guest favorites stay in localStorage. Signed-in favorites are loaded from MySQL.
+  // On sign-in, merge guest favorites into the customer's account wishlist.
+  useEffect(() => {
+    if (authLoading) return undefined;
+    let cancelled = false;
+
+    const loadFavorites = async () => {
+      setFavoritesLoaded(false);
+
+      if (!userId) {
+        setFavorites(readStoredFavorites());
+        setFavoritesLoaded(true);
+        return;
+      }
+
+      const guestFavorites = readStoredFavorites();
+      try {
+        let payload = await cartRequest('/api/account/wishlist');
+        let guestFavoritesMerged = guestFavorites.length === 0;
+
+        if (guestFavorites.length > 0) {
+          const productIds = [...new Set(guestFavorites.map((product) => Number(product.id)))];
+          try {
+            await cartRequest('/api/account/wishlist', {
+              method: 'POST',
+              body: { productIds },
+            });
+            guestFavoritesMerged = true;
+            try {
+              payload = await cartRequest('/api/account/wishlist');
+            } catch (refreshError) {
+              console.error('Wishlist was saved, but the refreshed list could not be loaded:', refreshError);
+              const existing = Array.isArray(payload.products) ? payload.products : [];
+              const existingIds = new Set(existing.map((product) => Number(product.id)));
+              payload = {
+                products: [
+                  ...existing,
+                  ...guestFavorites.filter((product) => !existingIds.has(Number(product.id))),
+                ],
+              };
+            }
+          } catch (mergeError) {
+            console.error('Unable to merge guest favorites into the account wishlist:', mergeError);
+          }
+        }
+
+        if (cancelled) return;
+        setFavorites(Array.isArray(payload.products) ? payload.products : []);
+        if (guestFavoritesMerged) {
+          try {
+            localStorage.removeItem('favorites');
+          } catch {
+            /* storage unavailable */
+          }
+        }
+      } catch (error) {
+        console.error('Unable to load the account wishlist:', error);
+        if (!cancelled) setFavorites(guestFavorites);
+      } finally {
+        if (!cancelled) setFavoritesLoaded(true);
+      }
+    };
+
+    loadFavorites();
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, userId]);
 
   const refreshCart = useCallback(async () => {
     if (!userId) {
@@ -124,12 +187,46 @@ export function CartProvider({ children }) {
   /** Called after an order is placed (the database has already emptied the cart). */
   const clearCart = useCallback(() => setCart(EMPTY_CART), []);
 
-  const toggleFavorite = (product) => {
-    setFavorites((prev) =>
-      prev.find((item) => item.id === product.id) ? prev.filter((item) => item.id !== product.id) : [...prev, product]
-    );
-  };
-  const isFavorite = (productId) => favorites.some((item) => item.id === productId);
+  const toggleFavorite = useCallback((product) => {
+    const productId = Number(product?.id);
+    if (!Number.isSafeInteger(productId) || productId <= 0) return;
+
+    const wasFavorite = favorites.some((item) => Number(item.id) === productId);
+    const nextFavorites = wasFavorite
+      ? favorites.filter((item) => Number(item.id) !== productId)
+      : [...favorites, product];
+
+    setFavorites(nextFavorites);
+
+    if (!userId) {
+      try {
+        localStorage.setItem('favorites', JSON.stringify(nextFavorites));
+      } catch {
+        /* storage unavailable */
+      }
+      return;
+    }
+
+    const mutation = wasFavorite
+      ? cartRequest('/api/account/wishlist?productId=' + encodeURIComponent(productId), { method: 'DELETE' })
+      : cartRequest('/api/account/wishlist', { method: 'POST', body: { productId } });
+
+    mutation.catch(async (error) => {
+      console.error('Unable to update the account wishlist:', error);
+      try {
+        const payload = await cartRequest('/api/account/wishlist');
+        setFavorites(Array.isArray(payload.products) ? payload.products : []);
+      } catch (refreshError) {
+        console.error('Unable to refresh the account wishlist:', refreshError);
+        setFavorites(favorites);
+      }
+    });
+  }, [favorites, userId]);
+
+  const isFavorite = useCallback(
+    (productId) => favorites.some((item) => Number(item.id) === Number(productId)),
+    [favorites]
+  );
 
   const value = useMemo(
     () => ({
@@ -144,12 +241,11 @@ export function CartProvider({ children }) {
       removeFromCart,
       clearCart,
       favorites,
+      favoritesLoaded,
       toggleFavorite,
       isFavorite,
     }),
-    // toggleFavorite/isFavorite are recreated each render on purpose (they close over favorites)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cart, isCartLoaded, refreshCart, addToCart, updateQuantity, removeFromCart, clearCart, favorites]
+    [cart, isCartLoaded, refreshCart, addToCart, updateQuantity, removeFromCart, clearCart, favorites, favoritesLoaded, toggleFavorite, isFavorite]
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: this Next.js route runs a SELECT with LEFT JOIN, COUNT and GROUP BY directly against MySQL. The route remains here so Next.js can register the HTTP endpoint.
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 

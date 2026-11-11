@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: this route persists signed-in wishlist items with parameterized SELECT, INSERT and DELETE statements.
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { getPool } from '@/lib/db';

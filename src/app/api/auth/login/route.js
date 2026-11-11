@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: authentication loads the user record with a parameterized SELECT; passwords are verified server-side.
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import {

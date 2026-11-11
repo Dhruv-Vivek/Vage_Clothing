@@ -1,3 +1,4 @@
+// EMBEDDED MYSQL: this Next.js route reads/inserts address rows and calls the stored procedure for default-address management.
 import { query, getPool } from '@/lib/db';
 import { userRoute } from '@/lib/api';
 import { HttpError, cleanAddress, readJson } from '@/lib/validate';
