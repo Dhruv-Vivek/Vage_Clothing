@@ -12,13 +12,18 @@ export const GET = userRoute(async ({ request, user }) => {
   const offset = (page - 1) * limit;
 
   const orders = await query(
-    `SELECT order_id, order_number, status, payment_status, total_amount, created_at
-       FROM orders WHERE user_id = ?
+    `SELECT order_id, order_number, status, payment_status, total_amount, created_at,
+            COUNT(*) OVER() AS filtered_total
+       FROM orders
+      WHERE user_id = ?
       ORDER BY created_at DESC, order_id DESC
-      LIMIT ${limit} OFFSET ${offset}`,
-    [user.id]
+      LIMIT ? OFFSET ?`,
+    [user.id, limit, offset]
   );
-  const [{ total }] = await query('SELECT COUNT(*) AS total FROM orders WHERE user_id = ?', [user.id]);
+  // Window COUNT avoids the separate count query except when the page is empty.
+  const total = orders.length
+    ? Number(orders[0].filtered_total)
+    : Number((await query('SELECT COUNT(*) AS total FROM orders WHERE user_id = ?', [user.id]))[0]?.total || 0);
 
   let items = [];
   if (orders.length) {
