@@ -2,38 +2,41 @@
 
 ## Honest architecture explanation
 
-"VAGE uses MySQL 8 as its transactional database. The Next.js server connects through mysql2/promise. The connection pool is in src/lib/db.js. SQL statements are executed from server-only JavaScript modules using parameterized statements. The UI currently communicates with server route handlers under src/app/api; those handlers invoke the database modules. Database credentials are not sent to the browser."
+"VAGE uses MySQL 8 as its transactional database. The Next.js server connects through mysql2/promise. The connection pool is in src/lib/db.js. SQL statements are executed from server-only JavaScript modules using parameterized statements. Interactive client pages currently communicate with Next.js route handlers under src/app/api; those handlers execute or invoke the database modules. The Admin SQL Lab is a Server Component that directly invokes advanced SQL functions without a browser API fetch."
 
-If asked whether the current application has APIs: say yes, the Next.js route handlers are HTTP APIs. Do not claim that the current code is API-free. If the faculty prohibits *all* API routes, clarify whether server-side route handlers are included in that prohibition before changing architecture.
+Do not claim that the entire application is API-free. Browser code must never connect directly to MySQL or receive database credentials.
 
-## Where to show SQL-to-JavaScript invocation
+## Recommended live demo
 
-1. Open `src/lib/db.js` and show `query(sql, params)`, which calls `getPool().execute(sql, params)`.
-2. Open `src/lib/admin-products.js` and show parameterized SELECT/INSERT statements.
-3. Open `src/lib/orders.js` and `src/lib/membership.js` for transaction/business operations.
-4. Open corresponding route files under `src/app/api/` to show the call path from HTTP handler to server-side JS and SQL module.
+1. `schema_dump.sql`: show tables, primary/foreign keys, views, triggers and stored procedures.
+2. `src/lib/db.js`: show MySQL pool and `pool.execute(sql, params)`.
+3. `src/app/api/checkout/route.js`: show the parameterized `CALL place_order(?, ?, ?, ?, ?)`.
+4. `schema_dump.sql`: show the `place_order`, `confirm_payment`, and `set_default_address` procedure definitions.
+5. `src/lib/orders.js`: show transaction-aware order operations, joins, row locking and history handling.
+6. Storefront → Products: explain the product filter/search query; `src/app/api/products/route.js` uses full-text search and `COUNT(*) OVER()` for pagination.
+7. Admin → SQL Lab: show CTEs, window functions and correlated subqueries rendered by a server component.
+8. Open `database/advanced-demo-queries.sql` in MySQL Workbench to execute the same three read-only reports.
 
-## DDL / DML / joins
+## Advanced SQL concepts
 
-- DDL: `schema_dump.sql` and `database/*.sql` contain CREATE TABLE / ALTER TABLE statements.
-- DML: server modules contain SELECT, INSERT, UPDATE and DELETE SQL.
-- Joins: examples are in `src/lib/admin-products.js` and related catalogue/order modules.
-- Transactions: inspect order/membership operations for beginTransaction/commit/rollback logic before presenting a particular example.
-- Triggers: schema_dump.sql includes inventory audit and order-status triggers; inspect the exact trigger definition in MySQL Workbench.
+- CTEs (`WITH`): named logical stages in multi-step reports.
+- Window functions: `RANK`, `DENSE_RANK`, `COUNT(*) OVER`, `AVG() OVER` and `NTILE`.
+- Correlated subqueries: nested queries referring to the current outer row.
+- JOINs and aggregation: combine related normalized tables and compute business metrics.
+- CASE: classify inventory and product performance.
+- Stored procedures: `place_order` builds an order within MySQL; the application invokes it with parameterized `CALL`.
+- Triggers: inventory audit and order-status history/guard logic run when relevant rows change.
+- Transactions and row locks: keep multi-step checkout/order updates consistent.
+- Parameterized SQL: bind user values rather than concatenating them into SQL.
 
-## NoSQL
+## What "no APIs" could mean
 
-MongoDB is used in Phase 8 to store product-view/search/cart behavioural event documents and execute aggregation pipelines. This is not the same as vector search. The repository's product-intelligence path does not establish that Atlas Vector Search is implemented. Do not claim vector search unless a vector index and $vectorSearch query are actually added and configured.
+These are different:
+- External provider APIs: Razorpay/Cashfree payments and email delivery integrations.
+- Internal Next.js HTTP routes: `src/app/api/**/route.js`, called by some browser components.
 
-## Suggested live sequence
+The current application still uses internal route handlers for interactive flows. The SQL Lab demonstrates the Server Component → server-only query module → MySQL pattern without a browser API call. Removing every internal route needs a separate migration of each page/context and all authentication, checkout, payment, webhook and admin workflows. It is not safe to put SQL or DB credentials in browser components.
 
-1. Explain MySQL is the transactional source of truth.
-2. Show the database schema and key relationships in MySQL Workbench.
-3. Show one JOIN query and one correlated-subquery example from a SQL demo script or run one read-only query live.
-4. Show a trigger and explain the automatic audit/history insertion.
-5. Show the JS database pool and parameterized execute call.
-6. Show the business module invoking that SQL helper.
-7. Explain the Next.js route handler is the HTTP layer used by the current frontend.
-8. Explain MongoDB's event documents and aggregation separately from MySQL.
+## Safety
 
-Use a test database for all write demonstrations. Do not execute destructive DDL during the presentation.
+The SQL Lab and `database/advanced-demo-queries.sql` are read-only. Use a test database for write demonstrations. Do not execute destructive DDL during the evaluation.

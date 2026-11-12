@@ -10,6 +10,7 @@ const NAV = [
   { href: '/admin/products', label: 'Products', icon: Shirt },
   { href: '/admin/inventory', label: 'Inventory', icon: Boxes },
   { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
+  { href: '/admin/sql-lab', label: 'SQL Lab', icon: TrendingUp },
 ];
 const COMING = [
   { label: 'Customers', icon: Users },

@@ -147,7 +147,8 @@ export async function GET(request) {
     }
 
     const products = await query(
-      `SELECT vc.*, c.slug AS category_slug, p.created_at
+      `SELECT vc.*, c.slug AS category_slug, p.created_at,
+              COUNT(*) OVER() AS filtered_total
        ${fromSql}
        WHERE ${whereSql}
        ORDER BY ${orderSql}
@@ -155,14 +156,17 @@ export async function GET(request) {
       [...listParams, limit, (page - 1) * limit]
     );
 
-    const countRows = await query(
-      `SELECT COUNT(*) AS total
-       ${fromSql}
-       WHERE ${whereSql}`,
-      params
-    );
-
-    const total = Number(countRows[0]?.total || 0);
+    // Window COUNT returns the filtered total with each product row,
+    // avoiding a second round trip for normal pages. Fall back only when
+    // the requested page is empty (for example, a stale page number).
+    const total = products.length
+      ? Number(products[0].filtered_total)
+      : Number((await query(
+          `SELECT COUNT(*) AS total
+           ${fromSql}
+           WHERE ${whereSql}`,
+          params
+        ))[0]?.total || 0);
 
     return NextResponse.json(
       {
