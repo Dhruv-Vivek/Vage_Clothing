@@ -1,19 +1,24 @@
 # VAGE Clothing backend map
 
-This directory is a teaching/documentation and database-artifact layer. The live Next.js server implementation remains under `src/app/api` and `src/lib` so imports and routes continue working. Moving those modules physically without rewriting all imports, route handlers, and Next.js conventions would break the application.
+This folder contains the backend navigation guide and DBMS demonstration material. The live Next.js server implementation remains under `src/app` and `src/lib` so Next.js routing and imports continue working.
 
 ## Actual database access
 
 - `src/lib/db.js`: server-only MySQL connection pool (`mysql2/promise`).
 - SQL is executed with `pool.execute(sql, params)`; values are parameterized.
-- `src/lib/admin-products.js`, `src/lib/orders.js`, `src/lib/membership.js`, `src/lib/product-intelligence.js` and other server-only modules contain business SQL and database calls.
-- `src/app/api/**/route.js`: Next.js server route handlers. Browser code currently calls these routes. These ARE API endpoints; do not describe the current app as API-free.
-- `src/lib/mongodb.js` and `src/lib/product-intelligence.js`: MongoDB event-document storage and aggregation. The repository's current Phase 8 code is behavioural event analytics, not demonstrated MongoDB Atlas Vector Search.
+- `src/lib/admin-products.js`, `src/lib/orders.js`, `src/lib/membership.js`, `src/lib/product-intelligence.js` and other server-only modules contain business SQL.
+- `src/app/api/**/route.js`: existing Next.js HTTP route handlers. Interactive browser components still call some of these routes.
+- `src/lib/advanced-sql.js`: read-only MySQL 8 analytics using CTEs, window functions, correlated subqueries, joins, aggregation and CASE.
+- `src/app/admin/sql-lab/page.jsx`: protected React Server Component that calls `advanced-sql.js` directly. This page does not call an internal browser API.
+- `src/lib/mongodb.js` and `src/lib/product-intelligence.js`: MongoDB event-document storage and aggregation; the repository does not currently demonstrate Atlas Vector Search.
 
 ## Database scripts
 
-The canonical schema is `schema_dump.sql`; incremental database changes are in `database/`. Keep those migration files in their existing locations to avoid duplicating the source of truth.
+- `schema_dump.sql`: canonical schema dump, including existing views, triggers and stored procedures.
+- `database/`: incremental migrations and `advanced-demo-queries.sql` (read-only MySQL 8 demonstration queries).
 
-## Important for the DBMS demonstration
+## Important architecture distinction
 
-The instructor's requirement "no APIs" is not satisfied merely by organising files. The current frontend makes HTTP requests to Next.js `/api` routes, and those handlers call server-only SQL modules. A true no-API requirement needs an architecture decision: database calls cannot safely run in browser JavaScript because that would expose database credentials. For a class demonstration, show the SQL source and its server-side JavaScript invocation. Ask whether server-side Next.js route handlers count as APIs under the instruction before attempting a potentially breaking rewrite.
+SQL does not execute in browser React code. Browser code sends user intent to a trusted Next.js server entry point; the server validates identity and inputs, then executes parameterized SQL. Database credentials remain on the server.
+
+The existing application still has internal `/api/*` route handlers. The SQL Lab demonstrates a direct Server Component → server-only SQL module → MySQL path, but it does not remove all existing API routes. A complete removal requires migrating each client workflow to Server Actions/Server Components and carefully preserving auth, checkout, provider webhooks and other integrations.
