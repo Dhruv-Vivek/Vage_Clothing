@@ -33,17 +33,30 @@ function loadRazorpayCheckout() {
   return new Promise((resolve) => {
     const existing = document.getElementById('razorpay-checkout-script');
     if (existing) {
-      existing.addEventListener('load', () => resolve(Boolean(window.Razorpay)), { once: true });
-      existing.addEventListener('error', () => resolve(false), { once: true });
-      return;
+      if (existing.dataset.failed === 'true') {
+        existing.remove();
+      } else if (existing.dataset.loaded === 'true') {
+        resolve(Boolean(window.Razorpay));
+        return;
+      } else {
+        existing.addEventListener('load', () => resolve(Boolean(window.Razorpay)), { once: true });
+        existing.addEventListener('error', () => resolve(false), { once: true });
+        return;
+      }
     }
 
     const script = document.createElement('script');
     script.id = 'razorpay-checkout-script';
     script.src = 'https://checkout.razorpay.com/v1/checkout.js';
     script.async = true;
-    script.onload = () => resolve(Boolean(window.Razorpay));
-    script.onerror = () => resolve(false);
+    script.onload = () => {
+      script.dataset.loaded = 'true';
+      resolve(Boolean(window.Razorpay));
+    };
+    script.onerror = () => {
+      script.dataset.failed = 'true';
+      resolve(false);
+    };
     document.body.appendChild(script);
   });
 }
@@ -269,8 +282,8 @@ function Checkout() {
 
       const loaded = await loadRazorpayCheckout();
       if (!loaded || !window.Razorpay) {
-        await reconcileDismissedPayment(preparedOrder);
         setOrderError('Razorpay Checkout could not be loaded. Check your internet connection and try again.');
+        await reconcileDismissedPayment(preparedOrder);
         return;
       }
 
