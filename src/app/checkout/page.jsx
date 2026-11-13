@@ -26,6 +26,28 @@ async function postJson(url, body) {
   return payload;
 }
 
+function loadRazorpayCheckout() {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if (window.Razorpay) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    const existing = document.getElementById('razorpay-checkout-script');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(Boolean(window.Razorpay)), { once: true });
+      existing.addEventListener('error', () => resolve(false), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'razorpay-checkout-script';
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve(Boolean(window.Razorpay));
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
 const inputClass =
   'w-full px-4 py-3 bg-dark border border-dark-border rounded-lg text-white focus:outline-none focus:border-white';
 
@@ -52,9 +74,12 @@ function Checkout() {
   const [applyingCoupon, setApplyingCoupon] = useState(false);
 
   const [placing, setPlacing] = useState(false);
+  const [paymentPending, setPaymentPending] = useState(false);
   const [orderError, setOrderError] = useState('');
 
   const orderPlaced = useRef(false);
+  const checkoutIdempotencyKey = useRef(null);
+  const paymentHandled = useRef(false);
 
   // Load the customer's saved addresses once they are signed in.
   useEffect(() => {
@@ -149,21 +174,173 @@ function Checkout() {
     }
   };
 
+  const finishPaidOrder = async (orderId) => {
+    checkoutIdempotencyKey.current = null;
+    orderPlaced.current = true;
+    // The payment-capture transaction removes purchased lines from MySQL.
+    // Refresh first so the client cache also reflects the committed cart state.
+    await refreshCart();
+    clearCart();
+    router.push(`/order-success?id=${orderId}`);
+  };
+
+  const reconcileDismissedPayment = async (preparedOrder) => {
+    try {
+      const result = await postJson('/api/payments/abandon', {
+        orderId: preparedOrder.orderId,
+        razorpayOrderId: preparedOrder.razorpayOrderId,
+      });
+
+      if (result.paymentStatus === 'PAID') {
+        await finishPaidOrder(preparedOrder.orderId);
+        return;
+      }
+
+      if (result.paymentStatus === 'PENDING') {
+        setPaymentPending(true);
+        setOrderError(
+          result.message ||
+          'Razorpay has authorised this payment and is awaiting capture. Do not make another payment. Check My Orders for the latest status.'
+        );
+      } else {
+        checkoutIdempotencyKey.current = null;
+        setOrderError('Payment was not completed. Your reserved stock has been released. You can try checkout again.');
+      }
+    } catch (error) {
+      // We cannot safely create another charge until the gateway status is known.
+      setPaymentPending(true);
+      setOrderError(
+        error.message ||
+        'We could not confirm the payment status. Do not pay again; check My Orders shortly.'
+      );
+    } finally {
+      setPlacing(false);
+    }
+  };
+
   const handlePlaceOrder = async () => {
     setOrderError('');
+    if (paymentPending) return;
+
+    const selectedAddress = addresses.find((address) => address.id === selectedAddressId);
+    if (!selectedAddress) {
+      setOrderError('Choose or save a delivery address before continuing.');
+      return;
+    }
+
     setPlacing(true);
+    paymentHandled.current = false;
+
     try {
-      const result = await postJson('/api/checkout', {
-        addressId: selectedAddressId,
-        deliveryOption: selectedDelivery,
-        couponCode: coupon?.code || null,
-        paymentMethod: 'COD',
+      if (!checkoutIdempotencyKey.current) {
+        checkoutIdempotencyKey.current = window.crypto?.randomUUID
+          ? window.crypto.randomUUID()
+          : `vage_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      }
+
+      const preparedOrder = await postJson('/api/checkout/create-order', {
+        idempotencyKey: checkoutIdempotencyKey.current,
+        items: cartItems.map((item) => ({
+          variantId: item.variantId,
+          quantity: item.quantity,
+        })),
+        shippingInfo: {
+          fullName: selectedAddress.recipientName,
+          email: user.email,
+          phone: selectedAddress.phone,
+          address: [selectedAddress.addressLine1, selectedAddress.addressLine2]
+            .filter(Boolean)
+            .join(', ')
+            .slice(0, 200),
+          city: selectedAddress.city,
+          state: selectedAddress.state,
+          pincode: selectedAddress.postalCode,
+        },
+        deliveryMethod: selectedDelivery,
+        couponCode: coupon?.code || '',
       });
-      orderPlaced.current = true;
-      clearCart();
-      router.push(`/order-success?id=${result.orderId}`);
+
+      if (preparedOrder.paymentProvider !== 'RAZORPAY') {
+        throw new Error('Razorpay is not selected on the server. Set PAYMENT_PROVIDER=RAZORPAY in .env.local and restart the development server.');
+      }
+      if (!preparedOrder.razorpayOrderId || !preparedOrder.keyId || !preparedOrder.amount) {
+        throw new Error('Razorpay did not return a valid checkout order. Please try again.');
+      }
+
+      const loaded = await loadRazorpayCheckout();
+      if (!loaded || !window.Razorpay) {
+        await reconcileDismissedPayment(preparedOrder);
+        setOrderError('Razorpay Checkout could not be loaded. Check your internet connection and try again.');
+        return;
+      }
+
+      const options = {
+        key: preparedOrder.keyId,
+        amount: preparedOrder.amount,
+        currency: preparedOrder.currency || 'INR',
+        name: 'VAGE Clothing',
+        description: `Order ${preparedOrder.orderNumber}`,
+        order_id: preparedOrder.razorpayOrderId,
+        prefill: {
+          name: selectedAddress.recipientName,
+          email: user.email,
+          contact: String(selectedAddress.phone || '').replace(/\\D/g, '').slice(-10),
+        },
+        notes: {
+          vage_order_number: preparedOrder.orderNumber,
+        },
+        theme: { color: '#ffffff' },
+        modal: {
+          ondismiss: () => {
+            if (paymentHandled.current) return;
+            paymentHandled.current = true;
+            void reconcileDismissedPayment(preparedOrder);
+          },
+        },
+        handler: async (response) => {
+          if (paymentHandled.current) return;
+          paymentHandled.current = true;
+
+          try {
+            const verification = await postJson('/api/payments/verify', {
+              orderId: preparedOrder.orderId,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+
+            if (verification.paymentStatus === 'PAID') {
+              await finishPaidOrder(preparedOrder.orderId);
+              return;
+            }
+
+            setPaymentPending(true);
+            setOrderError(
+              verification.message ||
+              'Razorpay has not confirmed capture yet. Do not pay again; check My Orders for the latest payment status.'
+            );
+            setPlacing(false);
+          } catch (error) {
+            // The gateway may already have collected payment. Never start another attempt
+            // until the payment has been reconciled by the server/webhook.
+            setPaymentPending(true);
+            setOrderError(
+              error.message ||
+              'Payment was submitted, but VAGE could not verify it yet. Do not pay again; check My Orders shortly.'
+            );
+            setPlacing(false);
+          }
+        },
+      };
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.on('payment.failed', (event) => {
+        const description = event?.error?.description;
+        setOrderError(description || 'Razorpay could not complete the payment. You can retry inside the secure payment window.');
+      });
+      razorpay.open();
     } catch (error) {
-      setOrderError(error.message);
+      setOrderError(error.message || 'Unable to start Razorpay checkout. Please try again.');
       if (error.status === 409) refreshCart(); // stock changed: show the customer the up-to-date cart
       setPlacing(false);
     }
@@ -431,19 +608,18 @@ function Checkout() {
                   <h2 className="text-2xl font-bold text-white mb-6">Payment</h2>
 
                   <div className="space-y-3 mb-6">
-                    <label className="block p-5 rounded-xl border-2 border-white bg-white/5">
+                    <div className="block p-5 rounded-xl border-2 border-white bg-white/5">
                       <div className="flex items-center gap-4">
-                        <input type="radio" name="payment" checked readOnly className="w-5 h-5" />
+                        <div className="w-5 h-5 rounded-full border-4 border-white bg-dark flex-shrink-0" aria-hidden="true" />
                         <div>
-                          <p className="text-white font-semibold">Cash on delivery</p>
-                          <p className="text-light-gray text-sm">Pay when your order arrives.</p>
+                          <p className="text-white font-semibold">Razorpay secure checkout</p>
+                          <p className="text-light-gray text-sm">UPI, debit/credit cards, net banking and supported wallets.</p>
                         </div>
                       </div>
-                    </label>
-                    <div className="p-5 rounded-xl border-2 border-dark-border opacity-60">
-                      <p className="text-white font-semibold">UPI, cards and net banking</p>
-                      <p className="text-light-gray text-sm">Online payment is coming soon.</p>
                     </div>
+                    <p className="text-light-gray text-xs">
+                      Your final amount is recalculated securely from MySQL before Razorpay opens. VAGE stores the order and verifies the payment signature on the server.
+                    </p>
                   </div>
 
                   {cartHasIssues ? (
@@ -454,12 +630,15 @@ function Checkout() {
                   ) : null}
 
                   {orderError ? (
-                    <p role="alert" className="mb-4 rounded-lg border border-red-500/40 px-4 py-3 text-sm text-red-300">
+                    <div role="alert" aria-live="polite" className="mb-4 rounded-lg border border-red-500/40 px-4 py-3 text-sm text-red-300">
                       {orderError}{' '}
                       {orderError.toLowerCase().includes('cart') ? (
                         <button onClick={() => router.push('/cart')} className="underline">Go to cart</button>
                       ) : null}
-                    </p>
+                      {paymentPending ? (
+                        <button onClick={() => router.push('/orders')} className="ml-2 underline">View My Orders</button>
+                      ) : null}
+                    </div>
                   ) : null}
 
                   <div className="flex gap-4">
@@ -467,9 +646,9 @@ function Checkout() {
                       className="flex-1 py-4 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all disabled:opacity-50">
                       Back
                     </button>
-                    <button onClick={handlePlaceOrder} disabled={placing || cartHasIssues}
+                    <button onClick={handlePlaceOrder} disabled={placing || paymentPending || cartHasIssues || !selectedAddressId}
                       className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all disabled:opacity-50">
-                      {placing ? 'Placing order…' : `Place Order · ${inr(finalTotal, 2)}`}
+                      {placing ? 'Opening Razorpay…' : paymentPending ? 'Payment verification pending' : `Pay securely · ${inr(finalTotal, 2)}`}
                     </button>
                   </div>
                 </motion.div>
