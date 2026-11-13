@@ -22,25 +22,35 @@ export async function POST(request) {
   }
 
   const orderId = Number(body?.orderId);
-  const razorpayOrderId = typeof body?.razorpayOrderId === 'string'
+  const suppliedGatewayOrderId = typeof body?.razorpayOrderId === 'string'
     ? body.razorpayOrderId.trim()
     : '';
 
-  if (!Number.isSafeInteger(orderId) || orderId <= 0 || !/^order_[A-Za-z0-9]+$/.test(razorpayOrderId)) {
+  if (!Number.isSafeInteger(orderId) || orderId <= 0) {
     return NextResponse.json({ error: 'Invalid checkout reference.' }, { status: 400 });
   }
 
+  // Resolve the Razorpay order reference from MySQL instead of trusting the
+  // browser. This also lets a customer safely reconcile an older pending order.
   const linked = await query(
     `SELECT g.gateway_order_id
      FROM order_payment_gateways g
      INNER JOIN payments p ON p.payment_id = g.payment_id
      INNER JOIN orders o ON o.order_id = p.order_id
-     WHERE o.order_id = ? AND o.user_id = ? AND g.gateway_order_id = ?
+     WHERE o.order_id = ? AND o.user_id = ? AND g.gateway = 'RAZORPAY'
      LIMIT 1`,
-    [orderId, user.id, razorpayOrderId]
+    [orderId, user.id]
   );
 
-  if (!linked.length) return NextResponse.json({ error: 'Checkout reference not found.' }, { status: 404 });
+  if (!linked.length) return NextResponse.json({ error: 'Razorpay order not found for this account.' }, { status: 404 });
+
+  const razorpayOrderId = linked[0].gateway_order_id;
+  if (
+    !/^order_[A-Za-z0-9]+$/.test(razorpayOrderId) ||
+    (suppliedGatewayOrderId && suppliedGatewayOrderId !== razorpayOrderId)
+  ) {
+    return NextResponse.json({ error: 'Checkout reference does not match this order.' }, { status: 400 });
+  }
 
   try {
     const response = await getRazorpay().orders.fetchPayments(razorpayOrderId);
