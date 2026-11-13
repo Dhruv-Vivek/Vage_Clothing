@@ -169,7 +169,16 @@ export async function POST(request) {
       if (payment.order_id !== gatewayOrderId) {
         return jsonError('The payment is not linked to this Razorpay order.', 400);
       }
-      if (toCents(payment.amount) !== toCents(linked.payment_amount) || payment.currency !== 'INR') {
+      // Razorpay's payment.amount is already in paise; MySQL stores INR decimal.
+      // Convert only the MySQL amount. Multiplying Razorpay's paise by 100 again
+      // caused valid captured payments to fail the amount comparison.
+      const razorpayAmountPaise = Number(payment.amount);
+      const orderAmountPaise = toCents(linked.payment_amount);
+      if (
+        !Number.isSafeInteger(razorpayAmountPaise) ||
+        razorpayAmountPaise !== orderAmountPaise ||
+        payment.currency !== 'INR'
+      ) {
         return jsonError('Payment amount or currency does not match this order.', 400);
       }
 
