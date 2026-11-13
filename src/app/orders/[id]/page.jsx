@@ -18,6 +18,8 @@ export default function OrderDetailPage() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const [cancelling, setCancelling] = useState(false);
+  const [reconcilingPayment, setReconcilingPayment] = useState(false);
+  const [paymentNotice, setPaymentNotice] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -34,6 +36,38 @@ export default function OrderDetailPage() {
   useEffect(() => {
     if (isLoggedIn) load();
   }, [isLoggedIn, load]);
+
+  const reconcilePayment = async () => {
+    setReconcilingPayment(true);
+    setPaymentNotice('');
+    setError('');
+    try {
+      const response = await fetch('/api/payments/abandon', {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: Number(id) }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Unable to check Razorpay payment status.');
+
+      if (body.paymentStatus === 'PAID') {
+        setPaymentNotice('Razorpay confirms this payment was captured. Your VAGE order has been updated.');
+      } else if (body.paymentStatus === 'PENDING') {
+        setPaymentNotice(body.message || 'Payment is still pending at Razorpay. Do not pay again; check again shortly.');
+      } else if (body.paymentStatus === 'FAILED') {
+        setPaymentNotice('Razorpay did not capture this payment. The order has been marked failed and reserved stock released.');
+      } else {
+        setPaymentNotice('Razorpay payment status checked. Refresh the order details for the latest status.');
+      }
+      await load();
+    } catch (e) {
+      setError(e.message || 'Unable to reconcile this payment.');
+    } finally {
+      setReconcilingPayment(false);
+    }
+  };
 
   const cancel = async () => {
     if (!window.confirm('Cancel this order? Items will go back into stock.')) return;
@@ -85,6 +119,28 @@ export default function OrderDetailPage() {
               </div>
               <OrderStatusBadge status={order.status} />
             </div>
+
+            {paymentNotice ? (
+              <p role="status" className="rounded-lg border border-sky-500/30 px-4 py-3 text-sm text-sky-200">
+                {paymentNotice}
+              </p>
+            ) : null}
+
+            {order.paymentStatus === 'PENDING' && payment?.method === 'RAZORPAY' ? (
+              <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-5">
+                <p className="text-sm text-amber-100">
+                  This order is awaiting payment confirmation. Check Razorpay's actual transaction status before attempting another payment.
+                </p>
+                <button
+                  type="button"
+                  onClick={reconcilePayment}
+                  disabled={reconcilingPayment}
+                  className="mt-4 rounded-lg bg-white px-5 py-3 text-sm font-medium text-black transition-colors hover:bg-lighter-gray disabled:opacity-50"
+                >
+                  {reconcilingPayment ? 'Checking Razorpay…' : 'Check payment status'}
+                </button>
+              </section>
+            ) : null}
 
             {/* Items */}
             <section className="bg-dark-secondary border border-dark-border rounded-xl p-6" aria-labelledby="items-h">
