@@ -202,9 +202,6 @@ function Checkout() {
   const couponDiscount = checkoutQuote
     ? checkoutQuote.couponDiscountCents / 100
     : (coupon?.discount || 0);
-  const finalDiscount = checkoutQuote
-    ? checkoutQuote.discountCents / 100
-    : couponDiscount;
   const finalTotal = checkoutQuote
     ? checkoutQuote.totalCents / 100
     : Math.max(0, cartTotal - couponDiscount) + deliveryPrice;
