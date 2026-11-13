@@ -297,7 +297,7 @@ function Checkout() {
         prefill: {
           name: selectedAddress.recipientName,
           email: user.email,
-          contact: String(selectedAddress.phone || '').replace(/\\D/g, '').slice(-10),
+          contact: String(selectedAddress.phone || '').replace(/\D/g, '').slice(-10),
         },
         notes: {
           vage_order_number: preparedOrder.orderNumber,
