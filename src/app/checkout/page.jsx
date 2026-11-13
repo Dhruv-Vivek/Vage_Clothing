@@ -85,6 +85,9 @@ function Checkout() {
   const [coupon, setCoupon] = useState(null); // { code, discount }
   const [couponError, setCouponError] = useState('');
   const [applyingCoupon, setApplyingCoupon] = useState(false);
+  const [checkoutQuote, setCheckoutQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
 
   const [placing, setPlacing] = useState(false);
   const [paymentPending, setPaymentPending] = useState(false);
@@ -128,6 +131,43 @@ function Checkout() {
     }
   }, [isCartLoaded, isLoggedIn, cartItems.length, router]);
 
+  useEffect(() => {
+    if (!isLoggedIn || !isCartLoaded || cartItems.length === 0) {
+      setCheckoutQuote(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setQuoteLoading(true);
+    setQuoteError('');
+
+    postJson('/api/checkout/quote', {
+      items: cartItems.map((item) => ({
+        variantId: item.variantId,
+        quantity: item.quantity,
+      })),
+      deliveryMethod: selectedDelivery,
+      couponCode: coupon?.code || '',
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setCheckoutQuote(result.quote);
+        setCouponError(result.quote.couponError || '');
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setCheckoutQuote(null);
+        setQuoteError(error.message || 'Unable to calculate the server checkout total.');
+      })
+      .finally(() => {
+        if (!cancelled) setQuoteLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, isCartLoaded, cartItems, selectedDelivery, coupon?.code]);
+
   if (authLoading || !isCartLoaded) return null;
 
   if (!isLoggedIn) {
@@ -150,9 +190,24 @@ function Checkout() {
   if (cartItems.length === 0) return null;
 
   const delivery = deliveryOptions.find((d) => d.id === selectedDelivery);
-  const deliveryPrice = hasMembership ? 0 : delivery?.price || 0;
-  const discount = coupon?.discount || 0;
-  const finalTotal = Math.max(0, cartTotal - discount) + deliveryPrice;
+  const deliveryPrice = checkoutQuote
+    ? checkoutQuote.shippingCents / 100
+    : (delivery?.price || 0);
+  const subtotalForDisplay = checkoutQuote
+    ? checkoutQuote.subtotalCents / 100
+    : cartTotal;
+  const membershipDiscount = checkoutQuote
+    ? checkoutQuote.membershipDiscountCents / 100
+    : 0;
+  const couponDiscount = checkoutQuote
+    ? checkoutQuote.couponDiscountCents / 100
+    : (coupon?.discount || 0);
+  const finalDiscount = checkoutQuote
+    ? checkoutQuote.discountCents / 100
+    : couponDiscount;
+  const finalTotal = checkoutQuote
+    ? checkoutQuote.totalCents / 100
+    : Math.max(0, cartTotal - couponDiscount) + deliveryPrice;
 
   const saveAddress = async (event) => {
     event.preventDefault();
@@ -334,14 +389,10 @@ function Checkout() {
             );
             setPlacing(false);
           } catch (error) {
-            // The gateway may already have collected payment. Never start another attempt
-            // until the payment has been reconciled by the server/webhook.
-            setPaymentPending(true);
-            setOrderError(
-              error.message ||
-              'Payment was submitted, but VAGE could not verify it yet. Do not pay again; check My Orders shortly.'
-            );
-            setPlacing(false);
+            // The gateway may already have collected payment. Reconcile against
+            // Razorpay's server-side payment list before allowing another checkout.
+            console.error('Razorpay callback verification failed; reconciling order:', error);
+            await reconcileDismissedPayment(preparedOrder);
           }
         },
       };
@@ -549,7 +600,7 @@ function Checkout() {
                   {hasMembership && (
                     <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
                       <p className="text-green-400 font-medium">
-                        🎉 Free delivery on all orders for {membershipType} members!
+                        Your active {membershipType} membership benefits are included in the server-calculated order total.
                       </p>
                     </div>
                   )}
@@ -578,8 +629,12 @@ function Checkout() {
                             </div>
                           </div>
                           <div className="text-right">
-                            {hasMembership ? (
-                              <p className="text-green-400 font-bold">FREE</p>
+                            {selectedDelivery === option.id && checkoutQuote ? (
+                              checkoutQuote.shippingCents === 0 ? (
+                                <p className="text-green-400 font-bold">FREE</p>
+                              ) : (
+                                <p className="text-white font-bold">{inr(checkoutQuote.shippingCents / 100, 2)}</p>
+                              )
                             ) : (
                               <p className="text-white font-bold">₹{option.price}</p>
                             )}
@@ -603,9 +658,9 @@ function Checkout() {
                       className="flex-1 py-4 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all">
                       Back
                     </button>
-                    <button onClick={() => setCurrentStep(3)}
-                      className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all">
-                      Continue to Payment
+                    <button onClick={() => setCurrentStep(3)} disabled={quoteLoading || !checkoutQuote}
+                      className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all disabled:opacity-50">
+                      {quoteLoading ? 'Calculating total…' : 'Continue to Payment'}
                     </button>
                   </div>
                 </motion.div>
@@ -659,7 +714,7 @@ function Checkout() {
                       className="flex-1 py-4 bg-dark-secondary border border-dark-border text-white rounded-lg font-medium hover:border-white transition-all disabled:opacity-50">
                       Back
                     </button>
-                    <button onClick={handlePlaceOrder} disabled={placing || paymentPending || cartHasIssues || !selectedAddressId}
+                    <button onClick={handlePlaceOrder} disabled={placing || paymentPending || cartHasIssues || !selectedAddressId || quoteLoading || !checkoutQuote}
                       className="flex-1 py-4 bg-white text-black rounded-lg font-medium hover:bg-lighter-gray transition-all disabled:opacity-50">
                       {placing ? 'Opening Razorpay…' : paymentPending ? 'Payment verification pending' : `Pay securely · ${inr(finalTotal, 2)}`}
                     </button>
@@ -727,22 +782,37 @@ function Checkout() {
                 <div className="border-t border-dark-border pt-4 space-y-3">
                   <div className="flex justify-between text-light-gray">
                     <span>Subtotal</span>
-                    <span>{inr(cartTotal, 2)}</span>
+                    <span>{inr(subtotalForDisplay, 2)}</span>
                   </div>
-                  {discount > 0 && (
+                  {membershipDiscount > 0 && (
                     <div className="flex justify-between text-green-400">
-                      <span>Discount</span>
-                      <span>−{inr(discount, 2)}</span>
+                      <span>Membership discount</span>
+                      <span>−{inr(membershipDiscount, 2)}</span>
+                    </div>
+                  )}
+                  {couponDiscount > 0 && (
+                    <div className="flex justify-between text-green-400">
+                      <span>Coupon discount</span>
+                      <span>−{inr(couponDiscount, 2)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-light-gray">
                     <span>Delivery</span>
-                    <span>{deliveryPrice === 0 ? <span className="text-green-400">FREE</span> : `₹${deliveryPrice}`}</span>
+                    <span>{deliveryPrice === 0 ? <span className="text-green-400">FREE</span> : inr(deliveryPrice, 2)}</span>
                   </div>
+                  {quoteLoading ? (
+                    <p className="text-xs text-light-gray">Updating your total from MySQL…</p>
+                  ) : null}
+                  {quoteError ? (
+                    <p role="alert" className="text-xs text-red-300">{quoteError}</p>
+                  ) : null}
                   <div className="border-t border-dark-border pt-3 flex justify-between text-white text-xl font-bold">
                     <span>Total</span>
                     <span>{inr(finalTotal, 2)}</span>
                   </div>
+                  {checkoutQuote ? (
+                    <p className="text-xs text-light-gray">Final total calculated by VAGE from current MySQL prices, membership, coupon and delivery rules.</p>
+                  ) : null}
                 </div>
               </motion.div>
             </div>
