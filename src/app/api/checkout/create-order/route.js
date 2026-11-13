@@ -225,6 +225,12 @@ export async function POST(request) {
     return jsonError(error.message || 'Payment provider is not configured.', 503);
   }
 
+  // VAGE checkout is configured for Razorpay Standard Checkout only.
+  // Reject Demo/Cashfree before creating an order or reserving inventory.
+  if (provider !== 'RAZORPAY') {
+    return jsonError('Razorpay is required for checkout. Set PAYMENT_PROVIDER=RAZORPAY in .env.local and restart the server.', 503);
+  }
+
   let body;
   try {
     body = await request.json();

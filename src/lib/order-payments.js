@@ -91,6 +91,29 @@ export async function markGatewayPaymentCaptured({
         [orderId]
       );
 
+      // Remove only the variants included in this successfully paid order.
+      // Cart lines are not deleted while payment is pending or failed.
+      await connection.execute(
+        `DELETE ci
+         FROM cart_items AS ci
+         INNER JOIN carts AS c ON c.cart_id = ci.cart_id
+         INNER JOIN order_items AS oi
+           ON oi.order_id = ? AND oi.variant_id = ci.variant_id
+         WHERE c.user_id = ? AND c.status = 'ACTIVE'`,
+        [orderId, row.user_id]
+      );
+
+      // Close an active cart only when no remaining items are in it.
+      await connection.execute(
+        `UPDATE carts AS c
+         SET c.status = 'CHECKED_OUT'
+         WHERE c.user_id = ? AND c.status = 'ACTIVE'
+           AND NOT EXISTS (
+             SELECT 1 FROM cart_items AS ci WHERE ci.cart_id = c.cart_id
+           )`,
+        [row.user_id]
+      );
+
       if (queueEmails) {
         await enqueuePaidOrderEmails(connection, {
           order_id: orderId,
