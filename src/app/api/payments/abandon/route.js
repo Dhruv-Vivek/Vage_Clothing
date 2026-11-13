@@ -70,13 +70,14 @@ export async function POST(request) {
       return NextResponse.json({ paymentStatus: 'PAID', emailDelivery: result.emailResults });
     }
 
-    const authorised = payments.find((payment) =>
-      payment.order_id === razorpayOrderId && payment.status === 'authorized'
+    const inProgress = payments.find((payment) =>
+      payment.order_id === razorpayOrderId &&
+      ['created', 'authorized'].includes(String(payment.status || '').toLowerCase())
     );
-    if (authorised) {
+    if (inProgress) {
       return NextResponse.json({
         paymentStatus: 'PENDING',
-        message: 'Payment is authorised and is awaiting capture. The order has not been cancelled.',
+        message: 'Razorpay still has a payment in progress. The order has not been cancelled. Do not pay again.',
       }, { status: 202 });
     }
 
