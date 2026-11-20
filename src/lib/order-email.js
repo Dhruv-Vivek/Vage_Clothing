@@ -34,7 +34,7 @@ function formatPaidDate(value) {
 }
 
 /** Call inside the same DB transaction that marks the order as paid. */
-export async function enqueuePaidOrderEmails(connection, order) {
+export async function enqueueOrderConfirmation(connection, order) {
   const orderId = Number(order.order_id);
   const orderNumber = String(order.order_number);
   const recipient = String(order.email || '').trim().toLowerCase();
@@ -47,8 +47,16 @@ export async function enqueuePaidOrderEmails(connection, order) {
     `INSERT IGNORE INTO email_outbox
        (dedupe_key, event_type, recipient_email, subject, payload, status)
      VALUES (?, 'ORDER_CONFIRMATION', ?, ?, JSON_OBJECT('orderId', ?), 'PENDING')`,
-    [`order-confirmation/${orderId}`, recipient, `VAGE order ${orderNumber} confirmed`, orderId]
+    [`order-confirmation/${orderId}`, recipient, `VAGE order details — ${orderNumber}`, orderId]
   );
+
+}
+
+export async function enqueuePaidOrderEmails(connection, order) {
+  await enqueueOrderConfirmation(connection, order);
+  const orderId = Number(order.order_id);
+  const orderNumber = order.order_number;
+  const recipient = order.email.trim().toLowerCase();
 
   await connection.execute(
     `INSERT IGNORE INTO email_outbox
@@ -58,7 +66,7 @@ export async function enqueuePaidOrderEmails(connection, order) {
   );
 }
 
-async function loadOrderEmailData(orderId) {
+async function loadOrderEmailData(orderId, eventType) {
   const pool = getPool();
   const [orderRows] = await pool.execute(
     `SELECT
@@ -74,16 +82,16 @@ async function loadOrderEmailData(orderId) {
      FROM orders o
      INNER JOIN users u ON u.user_id = o.user_id
      LEFT JOIN addresses a ON a.address_id = o.address_id
-     LEFT JOIN payments p ON p.order_id = o.order_id AND p.status = 'SUCCESS'
+     LEFT JOIN payments p ON p.order_id = o.order_id AND (o.payment_status <> 'PAID' OR p.status = 'SUCCESS')
      LEFT JOIN order_payment_gateways g ON g.payment_id = p.payment_id
      WHERE o.order_id = ?
-     ORDER BY p.paid_at DESC
+     ORDER BY p.paid_at DESC, p.payment_id DESC
      LIMIT 1`,
     [orderId]
   );
 
   if (!orderRows.length) throw new Error('Order was not found for email delivery.');
-  if (orderRows[0].payment_status !== 'PAID') {
+  if (eventType === 'PAYMENT_RECEIPT' && orderRows[0].payment_status !== 'PAID') {
     throw new Error('Order emails are sent only after the payment is confirmed.');
   }
 
@@ -101,10 +109,10 @@ async function loadOrderEmailData(orderId) {
 
 function buildEmailContent(eventType, order, items) {
   const isReceipt = eventType === 'PAYMENT_RECEIPT';
-  const title = isReceipt ? 'Payment receipt' : 'Your order is confirmed';
+  const title = isReceipt ? 'Payment receipt' : 'Your order details';
   const intro = isReceipt
     ? 'We have successfully recorded your payment. Keep this email as your receipt.'
-    : 'Thank you for choosing VAGE. Your order is confirmed and is being prepared.';
+    : 'Thank you for choosing VAGE. We have received your order. Your items and current payment status are listed below.';
   const paymentProvider = String(order.payment_provider || order.payment_method || 'DEMO').toUpperCase();
   const paymentReference = order.transaction_ref || (
     paymentProvider === 'DEMO' ? 'DEMO-SIMULATED' : 'Recorded by payment provider'
@@ -185,8 +193,8 @@ function buildEmailContent(eventType, order, items) {
           <h2 style="font-size:14px;color:#fff;margin:0 0 12px">Payment details</h2>
           <p style="font-size:13px;color:#bbb;margin:6px 0">Method: <strong style="color:#eee">${escapeHtml(paymentMethod)}</strong></p>
           <p style="font-size:13px;color:#bbb;margin:6px 0">Provider: <strong style="color:#eee">${escapeHtml(paymentProvider)}</strong></p>
-          <p style="font-size:13px;color:#bbb;margin:6px 0">Reference: <strong style="color:#eee">${escapeHtml(paymentReference)}</strong></p>
-          <p style="font-size:13px;color:#bbb;margin:6px 0">Paid on: <strong style="color:#eee">${escapeHtml(formatPaidDate(order.paid_at))}</strong></p>
+          ${order.payment_status === 'PAID' ? `<p style="font-size:13px;color:#bbb;margin:6px 0">Reference: <strong style="color:#eee">${escapeHtml(paymentReference)}</strong></p>
+          <p style="font-size:13px;color:#bbb;margin:6px 0">Paid on: <strong style="color:#eee">${escapeHtml(formatPaidDate(order.paid_at))}</strong></p>` : `<p>Payment status: ${escapeHtml(order.payment_status)}</p>`}
         </div>
 
         <div style="margin-top:22px;padding-top:18px;border-top:1px solid #303030">
@@ -220,8 +228,9 @@ function buildEmailContent(eventType, order, items) {
     'PAYMENT DETAILS',
     `Method: ${paymentMethod}`,
     `Provider: ${paymentProvider}`,
-    `Reference: ${paymentReference}`,
-    `Paid on: ${formatPaidDate(order.paid_at)}`,
+    ...(order.payment_status === 'PAID'
+      ? [`Reference: ${paymentReference}`, `Paid on: ${formatPaidDate(order.paid_at)}`]
+      : [`Payment status: ${order.payment_status}`]),
     '',
     'SHIPPING ADDRESS',
     plainAddress,
@@ -262,7 +271,7 @@ async function dispatchOne(outboxRow) {
         throw new Error(`Unsupported transactional email event: ${outboxRow.event_type}`);
       }
       const orderId = Number(payload?.orderId);
-      const { order, items } = await loadOrderEmailData(orderId);
+      const { order, items } = await loadOrderEmailData(orderId, outboxRow.event_type);
       content = buildEmailContent(outboxRow.event_type, order, items);
     }
     const eventSlug = outboxRow.event_type.toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -415,4 +424,12 @@ export async function dispatchPendingEmails(limit = 20) {
   const results = [];
   for (const row of rows) results.push(await dispatchOne(row));
   return { checked: rows.length, results };
+}
+
+export async function dispatchOrderConfirmation(orderId) {
+  try {
+    await dispatchEmailsByDedupeKeys([`order-confirmation/${orderId}`]);
+  } catch (error) {
+    console.error('Order email dispatch deferred', orderId, error.message);
+  }
 }
