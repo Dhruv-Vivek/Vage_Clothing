@@ -1,3 +1,4 @@
+import { enqueueOrderConfirmation, dispatchOrderConfirmation } from '@/lib/order-email';
 import { getPool } from '@/lib/db';
 import { userRoute } from '@/lib/api';
 import { loadCart } from '@/lib/cart';
@@ -81,14 +82,18 @@ export const POST = userRoute(async ({ request, user }) => {
   const orderId = Number(placed.order_id);
 
   // Record how it will ship and how it will be paid on the order's first history entry.
-  await withTransaction((connection) =>
-    stampLatestHistory(
+  await withTransaction(async (connection) => {
+    await stampLatestHistory(
       connection,
       orderId,
       user.id,
       `Order placed: ${delivery.name} (${delivery.days}), ${PAYMENT_METHOD_LABELS[paymentMethod]}`
-    )
-  );
+    );
+    await enqueueOrderConfirmation(connection, {
+      order_id: orderId, order_number: placed.order_number, email: user.email,
+    });
+  });
+  await dispatchOrderConfirmation(orderId);
 
   return NextResponse.json(
     {
