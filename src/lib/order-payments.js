@@ -19,7 +19,7 @@ export async function markGatewayPaymentCaptured({
   amount,
   currency,
   signatureVerified = false,
-  dispatchEmails = false,
+  dispatchEmails = true,
   queueEmails = true,
 }) {
   const provider = String(gateway || '').trim().toUpperCase();
