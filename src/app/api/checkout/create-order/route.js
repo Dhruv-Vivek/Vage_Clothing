@@ -1,3 +1,4 @@
+import { enqueueOrderConfirmation, dispatchOrderConfirmation } from '@/lib/order-email';
 import { NextResponse } from 'next/server';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { getCurrentUser } from '@/lib/auth';
@@ -475,6 +476,9 @@ export async function POST(request) {
             user.id, input.idempotencyKey,
           ]
         );
+        await enqueueOrderConfirmation(connection2, {
+          order_id: orderId, order_number: orderNumber, email: input.email,
+        });
         await connection2.commit();
       } catch (error) {
         await connection2.rollback();
@@ -483,6 +487,7 @@ export async function POST(request) {
         connection2.release();
       }
 
+      await dispatchOrderConfirmation(orderId);
       return NextResponse.json(response);
     } catch (error) {
       await compensateFailedGatewayCreate(orderId);
